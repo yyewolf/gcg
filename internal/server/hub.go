@@ -39,17 +39,21 @@ func newHub(engine *game.Engine) *hub {
 }
 
 func (hub *hub) run(ctx context.Context) {
-	interval := time.Second / time.Duration(hub.engine.TickRate())
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	for {
+		interval := time.Second / time.Duration(hub.engine.TickRate())
+		timer := time.NewTimer(interval)
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			close(hub.closed)
 			hub.closeAll()
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			state := hub.engine.Advance()
 			hub.broadcastState(state.Tick)
 		}

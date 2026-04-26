@@ -11,12 +11,14 @@ const shipLaunchSpacing = 1.5
 const launchPositionTolerance = 0.001
 
 const planetGrowthIntervalSeconds = 2
+const growthTimeEpsilon = 1e-9
 
 type Engine struct {
 	mu          sync.RWMutex
 	tick        int64
 	tickRate    int
 	fleetSpeed  float64
+	growthTimer float64
 	worldWidth  float64
 	worldHeight float64
 	planets     map[int]*Planet
@@ -34,7 +36,7 @@ func NewEngineWithConfig(config MapConfig) *Engine {
 	mapLayout := newRandomMapLayoutWithConfig(config)
 
 	return &Engine{
-		tickRate:    DefaultTickRate,
+		tickRate:    DefaultIdleTickRate,
 		fleetSpeed:  defaultFleetSpeedUPS,
 		worldWidth:  mapLayout.Width,
 		worldHeight: mapLayout.Height,
@@ -68,6 +70,7 @@ func (engine *Engine) Advance() Snapshot {
 	engine.tick++
 	engine.moveFleetsLocked()
 	engine.growPlanetsLocked()
+	engine.tickRate = engine.resolveDynamicTickRateLocked()
 
 	return engine.snapshotLocked()
 }
@@ -189,6 +192,8 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 		}
 	}
 
+	engine.tickRate = engine.resolveDynamicTickRateLocked()
+
 	return firstFleet, nil
 }
 
@@ -247,21 +252,24 @@ func (engine *Engine) moveFleetsLocked() {
 }
 
 func (engine *Engine) growPlanetsLocked() {
-	growthInterval := int64(engine.tickRate * planetGrowthIntervalSeconds)
-	if growthInterval < 1 {
-		growthInterval = 1
-	}
-
-	if engine.tick%growthInterval != 0 {
+	if engine.tickRate < 1 {
 		return
 	}
+
+	engine.growthTimer += 1 / float64(engine.tickRate)
+	if engine.growthTimer+growthTimeEpsilon < planetGrowthIntervalSeconds {
+		return
+	}
+
+	growthSteps := int((engine.growthTimer + growthTimeEpsilon) / planetGrowthIntervalSeconds)
+	engine.growthTimer -= float64(growthSteps) * planetGrowthIntervalSeconds
 
 	for _, planet := range engine.planets {
 		if planet.Owner == 0 {
 			continue
 		}
 
-		planet.Ships += planet.Growth
+		planet.Ships += planet.Growth * growthSteps
 	}
 }
 

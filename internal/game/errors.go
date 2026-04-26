@@ -3,7 +3,8 @@ package game
 import "errors"
 
 const (
-	DefaultTickRate      = 30
+	DefaultTickRate      = 15
+	DefaultIdleTickRate  = 5
 	defaultFleetSpeedUPS = 110.0
 )
 

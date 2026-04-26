@@ -16,7 +16,7 @@ const (
 	maxPlayerCount           = 12
 	homePlanetRadius         = 40.0
 	homePlanetShips          = 70
-	homePlanetGrowth         = 4000
+	homePlanetGrowth         = 4
 	homeOrbitScaleX          = 0.38
 	homeOrbitScaleY          = 0.35
 	localNeutralCountPerHome = 2

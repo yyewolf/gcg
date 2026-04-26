@@ -30,6 +30,7 @@ const minCameraZoom = 1;
 const maxCameraZoom = 3.5;
 const zoomStep = 1.15;
 const panDragThreshold = 8;
+const predictionLeadTicks = 1.35;
 
 function buildStarField(width: number, height: number): Star[] {
   const count = Math.max(48, Math.round((width * height) / 28000));
@@ -60,6 +61,8 @@ export class GameBoard extends Container {
   private cameraZoom = 1;
   private cameraPanX = 0;
   private cameraPanY = 0;
+  private fleetPredictionMS = 0;
+  private fleetPredictionLimitMS = 100;
   private pointerDown = false;
   private dragActive = false;
   private dragStartX = 0;
@@ -110,10 +113,16 @@ export class GameBoard extends Container {
       this.syncFleets([], playerID);
       this.previousFleets.clear();
       this.previousPlanets.clear();
+      this.fleetPredictionMS = 0;
       return;
     }
 
     this.syncWorldBounds(snapshot.width, snapshot.height);
+    this.fleetPredictionMS = 0;
+    this.fleetPredictionLimitMS = Math.max(
+      50,
+      (1000 / Math.max(1, snapshot.tickRate)) * predictionLeadTicks,
+    );
 
     this.syncPlanets(snapshot.planets, playerID, selectedSourceID);
     this.syncLandingImpacts(snapshot.fleets, playerID);
@@ -125,8 +134,17 @@ export class GameBoard extends Container {
   }
 
   public update(deltaMS: number): void {
+    this.fleetPredictionMS = Math.min(
+      this.fleetPredictionMS + deltaMS,
+      this.fleetPredictionLimitMS,
+    );
+
     for (const planetView of this.planetViews.values()) {
       planetView.update(deltaMS);
+    }
+
+    for (const fleetView of this.fleetViews.values()) {
+      fleetView.predict(this.fleetPredictionMS);
     }
   }
 

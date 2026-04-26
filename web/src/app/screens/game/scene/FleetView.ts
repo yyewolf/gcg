@@ -19,6 +19,8 @@ export class FleetView extends Container {
   private readonly body = new Graphics();
   private readonly heading = new Graphics();
   private readonly trailPoints: TrailPoint[] = [];
+  private fleet: FleetSnapshot | null = null;
+  private color = palette.friendly;
 
   constructor(private readonly showDebugTrail: boolean) {
     super();
@@ -26,19 +28,37 @@ export class FleetView extends Container {
   }
 
   public sync(fleet: FleetSnapshot, isFriendly: boolean): void {
-    const color = isFriendly ? palette.friendly : palette.enemy;
+    this.fleet = fleet;
+    this.color = isFriendly ? palette.friendly : palette.enemy;
     this.position.set(fleet.x, fleet.y);
 
     if (this.showDebugTrail) {
       this.pushTrailPoint(fleet.x, fleet.y);
-      this.drawTrail(fleet, color);
-      this.drawHeading(fleet, color);
+      this.drawTrail(fleet, this.color);
+      this.drawHeading(fleet, this.color);
     } else {
       this.trailPoints.length = 0;
       this.trail.clear();
       this.heading.clear();
     }
-    this.drawShips(fleet, color);
+    this.drawShips(fleet, this.color);
+  }
+
+  public predict(elapsedMS: number): void {
+    if (this.fleet === null) {
+      return;
+    }
+
+    const deltaSeconds = elapsedMS / 1000;
+    this.position.set(
+      this.fleet.x + this.fleet.vx * deltaSeconds,
+      this.fleet.y + this.fleet.vy * deltaSeconds,
+    );
+
+    if (this.showDebugTrail) {
+      this.drawTrail(this.fleet, this.color);
+      this.drawHeading(this.fleet, this.color);
+    }
   }
 
   private pushTrailPoint(x: number, y: number): void {
