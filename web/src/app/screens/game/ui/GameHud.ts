@@ -99,7 +99,7 @@ export class GameHud extends Container {
     });
 
     this.help.text =
-      "Click one of your planets, then click any target. Arrow keys adjust launch %. R retries the socket.";
+      "Click one of your planets, then click any target. Drag pans, wheel zooms, arrow keys adjust launch %, R retries the socket.";
 
     this.addChild(
       this.chrome,

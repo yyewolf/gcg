@@ -1,8 +1,8 @@
 export const worldLayout = {
   hudHeight: 136,
   padding: 20,
-  worldWidth: 800,
-  worldHeight: 450,
+  worldWidth: 1400,
+  worldHeight: 840,
 };
 
 export const palette = {

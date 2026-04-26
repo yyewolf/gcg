@@ -1,4 +1,4 @@
-import { Container, Graphics, Text } from "pixi.js";
+import { Container, Graphics } from "pixi.js";
 
 import type { FleetSnapshot } from "../../../game/protocol";
 
@@ -8,8 +8,6 @@ const maxTrailPoints = 24;
 const minTrailPointDistance = 4;
 const shipLength = 4.5;
 const shipHalfWidth = 2.4;
-const formationDepthGap = 6;
-const formationWidthGap = 6;
 
 interface TrailPoint {
   x: number;
@@ -20,32 +18,16 @@ export class FleetView extends Container {
   private readonly trail = new Graphics();
   private readonly body = new Graphics();
   private readonly heading = new Graphics();
-  private readonly shipsLabel = new Text({
-    anchor: 0.5,
-    style: {
-      fill: palette.text,
-      fontFamily: "Trebuchet MS",
-      fontSize: 11,
-      fontWeight: "700",
-    },
-  });
   private readonly trailPoints: TrailPoint[] = [];
 
   constructor(private readonly showDebugTrail: boolean) {
     super();
-    this.addChild(this.trail, this.heading, this.body, this.shipsLabel);
+    this.addChild(this.trail, this.heading, this.body);
   }
 
   public sync(fleet: FleetSnapshot, isFriendly: boolean): void {
     const color = isFriendly ? palette.friendly : palette.enemy;
     this.position.set(fleet.x, fleet.y);
-    if (fleet.ships > 1) {
-      this.shipsLabel.text = String(fleet.ships);
-      this.shipsLabel.y = -12;
-      this.shipsLabel.visible = true;
-    } else {
-      this.shipsLabel.visible = false;
-    }
 
     if (this.showDebugTrail) {
       this.pushTrailPoint(fleet.x, fleet.y);
@@ -111,25 +93,7 @@ export class FleetView extends Container {
     this.body.clear();
     this.body.rotation = this.resolveRotation(fleet);
 
-    const shipCount = Math.max(1, Math.floor(fleet.ships));
-    let remaining = shipCount;
-    let rowSize = 1;
-    let rowIndex = 0;
-
-    while (remaining > 0) {
-      const shipsInRow = Math.min(remaining, rowSize);
-      const localX = -rowIndex * formationDepthGap;
-      const rowWidth = (shipsInRow - 1) * formationWidthGap;
-
-      for (let index = 0; index < shipsInRow; index += 1) {
-        const localY = index * formationWidthGap - rowWidth * 0.5;
-        this.drawShipGlyph(localX, localY);
-      }
-
-      remaining -= shipsInRow;
-      rowSize += 1;
-      rowIndex += 1;
-    }
+    this.drawShipGlyph(0, 0);
 
     this.body.fill({ color, alpha: 0.94 });
   }

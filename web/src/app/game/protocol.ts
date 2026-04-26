@@ -14,8 +14,6 @@ export interface FleetSnapshot {
   src: number;
   dst: number;
   ships: number;
-  startTick: number;
-  endTick: number;
   x: number;
   y: number;
   vx: number;
@@ -25,6 +23,8 @@ export interface FleetSnapshot {
 export interface Snapshot {
   tick: number;
   tickRate: number;
+  width: number;
+  height: number;
   planets: PlanetSnapshot[];
   fleets: FleetSnapshot[];
 }
@@ -92,16 +92,13 @@ function parseFleet(value: unknown): FleetSnapshot | null {
     return null;
   }
 
-  const { id, owner, src, dst, ships, startTick, endTick, x, y, vx, vy } =
-    value;
+  const { id, owner, src, dst, ships, x, y, vx, vy } = value;
   if (
     !isNumber(id) ||
     !isNumber(owner) ||
     !isNumber(src) ||
     !isNumber(dst) ||
     !isNumber(ships) ||
-    !isNumber(startTick) ||
-    !isNumber(endTick) ||
     !isNumber(x) ||
     !isNumber(y) ||
     !isNumber(vx) ||
@@ -110,7 +107,7 @@ function parseFleet(value: unknown): FleetSnapshot | null {
     return null;
   }
 
-  return { id, owner, src, dst, ships, startTick, endTick, x, y, vx, vy };
+  return { id, owner, src, dst, ships, x, y, vx, vy };
 }
 
 function parseSnapshot(value: unknown): Snapshot | null {
@@ -118,8 +115,13 @@ function parseSnapshot(value: unknown): Snapshot | null {
     return null;
   }
 
-  const { tick, tickRate, planets, fleets } = value;
-  if (!isNumber(tick) || !isNumber(tickRate)) {
+  const { tick, tickRate, width, height, planets, fleets } = value;
+  if (
+    !isNumber(tick) ||
+    !isNumber(tickRate) ||
+    !isNumber(width) ||
+    !isNumber(height)
+  ) {
     return null;
   }
 
@@ -148,6 +150,8 @@ function parseSnapshot(value: unknown): Snapshot | null {
   return {
     tick,
     tickRate,
+    width,
+    height,
     planets: parsedPlanets,
     fleets: parsedFleets,
   };

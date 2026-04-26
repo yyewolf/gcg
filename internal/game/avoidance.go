@@ -11,13 +11,18 @@ const (
 	fleetInfluencePadding    = 2.0
 	fleetRepulsionStrength   = 90.0
 	fleetTurnRateRadians     = 7.2
+	fleetMergeDistance       = 12.0
+	fleetMergeHeadingDot     = 0.985
+	baseFleetMergeMaxShips   = 2
+	maxFleetMergeMaxShips    = 32
+	fleetMergeScaleStep      = 600
 	fleetCollisionElasticity = 0.2
 	fleetSeparationDistance  = 8.0
 )
 
-func (engine *Engine) advanceFleetLocked(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex) {
+func (engine *Engine) advanceFleetLocked(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) {
 	deltaTime := 1 / float64(engine.tickRate)
-	desiredX, desiredY := engine.computeFleetAccelerationLocked(fleet, target, steeringIndex)
+	desiredX, desiredY := engine.computeFleetAccelerationLocked(fleet, target, steeringIndex, planetIndex)
 	desiredX, desiredY = normalizeVector(desiredX, desiredY)
 	if desiredX == 0 && desiredY == 0 {
 		desiredX, desiredY = normalizeVector(target.X-fleet.X, target.Y-fleet.Y)
@@ -47,29 +52,31 @@ func (engine *Engine) advanceFleetLocked(id int, fleet *Fleet, target *Planet, s
 
 	fleet.X = nextX
 	fleet.Y = nextY
-	engine.resolvePlanetCollisionsLocked(fleet, target)
+	engine.resolvePlanetCollisionsLocked(fleet, target, planetIndex)
 	fleet.VX, fleet.VY = clampMagnitude(fleet.VX, fleet.VY, engine.fleetSpeed)
 }
 
-func (engine *Engine) computeFleetAccelerationLocked(fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex) (float64, float64) {
+func (engine *Engine) computeFleetAccelerationLocked(fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) (float64, float64) {
 	targetX, targetY := normalizeVector(target.X-fleet.X, target.Y-fleet.Y)
 	accelerationX := targetX * targetPullAcceleration
 	accelerationY := targetY * targetPullAcceleration
-	blocking := engine.currentAvoidancePlanetLocked(fleet, target)
-
-	for _, planet := range engine.planets {
+	blocking := engine.currentAvoidancePlanetLocked(fleet, target, planetIndex)
+	visitPlanet := func(planet *Planet) {
+		if planet == nil {
+			return
+		}
 		if planet.ID == target.ID {
-			continue
+			return
 		}
 
 		normalX, normalY, distance, ok := normalFromPoint(planet.X, planet.Y, fleet.X, fleet.Y)
 		if !ok {
-			continue
+			return
 		}
 
 		influenceRadius := avoidanceRadius(planet) + planetInfluencePadding
 		if distance >= influenceRadius {
-			continue
+			return
 		}
 
 		weight := clamp01((influenceRadius - distance) / planetInfluencePadding)
@@ -80,6 +87,14 @@ func (engine *Engine) computeFleetAccelerationLocked(fleet *Fleet, target *Plane
 			tangentX, tangentY := tangentVector(normalX, normalY, fleet.AvoidClockwise)
 			accelerationX += tangentX * planetTangentialStrength * (0.2 + weight)
 			accelerationY += tangentY * planetTangentialStrength * (0.2 + weight)
+		}
+	}
+
+	if planetIndex != nil {
+		planetIndex.forEachNearby(fleet.X, fleet.Y, planetIndex.maxInfluenceRadius, visitPlanet)
+	} else {
+		for _, planet := range engine.planets {
+			visitPlanet(planet)
 		}
 	}
 
@@ -104,10 +119,13 @@ func (engine *Engine) computeFleetAccelerationLocked(fleet *Fleet, target *Plane
 	return accelerationX, accelerationY
 }
 
-func (engine *Engine) resolvePlanetCollisionsLocked(fleet *Fleet, target *Planet) {
-	for _, planet := range engine.planets {
+func (engine *Engine) resolvePlanetCollisionsLocked(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) {
+	visitPlanet := func(planet *Planet) {
+		if planet == nil {
+			return
+		}
 		if planet.ID == target.ID {
-			continue
+			return
 		}
 
 		radius := avoidanceRadius(planet)
@@ -121,7 +139,7 @@ func (engine *Engine) resolvePlanetCollisionsLocked(fleet *Fleet, target *Planet
 		}
 
 		if distance >= radius {
-			continue
+			return
 		}
 
 		fleet.X = planet.X + normalX*radius
@@ -131,6 +149,14 @@ func (engine *Engine) resolvePlanetCollisionsLocked(fleet *Fleet, target *Planet
 		if inwardSpeed < 0 {
 			fleet.VX -= inwardSpeed * normalX
 			fleet.VY -= inwardSpeed * normalY
+		}
+	}
+
+	if planetIndex != nil {
+		planetIndex.forEachNearby(fleet.X, fleet.Y, planetIndex.maxCollisionRadius, visitPlanet)
+	} else {
+		for _, planet := range engine.planets {
+			visitPlanet(planet)
 		}
 	}
 }
@@ -185,6 +211,35 @@ func (engine *Engine) resolveFleetCollisionsLocked(collisionIndex *fleetSpatialI
 	}
 }
 
+func (engine *Engine) mergeFleetsLocked(mergeIndex *fleetSpatialIndex) {
+	if len(engine.fleets) < 2 || mergeIndex == nil {
+		return
+	}
+
+	mergeMaxShips := dynamicFleetMergeMaxShips(len(engine.fleets))
+
+	for _, first := range engine.fleets {
+		if first == nil {
+			continue
+		}
+
+		mergeIndex.forEachNearby(first.X, first.Y, fleetMergeDistance, func(second *Fleet) {
+			if second == nil || second.ID <= first.ID {
+				return
+			}
+			if engine.fleets[first.ID] != first || engine.fleets[second.ID] != second {
+				return
+			}
+			if !canMergeFleets(first, second, mergeMaxShips) {
+				return
+			}
+
+			mergeFleet(first, second)
+			delete(engine.fleets, second.ID)
+		})
+	}
+}
+
 func (engine *Engine) resolveArrivalLocked(id int, fleet *Fleet, target *Planet) {
 	fleet.X = target.X
 	fleet.Y = target.Y
@@ -202,16 +257,83 @@ func (engine *Engine) resolveArrivalLocked(id int, fleet *Fleet, target *Planet)
 	delete(engine.fleets, id)
 }
 
+func dynamicFleetMergeMaxShips(fleetCount int) int {
+	mergeMaxShips := baseFleetMergeMaxShips
+	if fleetCount > 0 {
+		mergeMaxShips += fleetCount / fleetMergeScaleStep
+	}
+	if mergeMaxShips > maxFleetMergeMaxShips {
+		return maxFleetMergeMaxShips
+	}
+
+	return mergeMaxShips
+}
+
+func canMergeFleets(first, second *Fleet, mergeMaxShips int) bool {
+	if first.Owner != second.Owner || first.SourceID != second.SourceID || first.TargetID != second.TargetID {
+		return false
+	}
+	if first.Ships+second.Ships > mergeMaxShips {
+		return false
+	}
+	if first.AvoidPlanetID != second.AvoidPlanetID || first.AvoidClockwise != second.AvoidClockwise {
+		return false
+	}
+	if distanceSquared(first.X, first.Y, second.X, second.Y) > fleetMergeDistance*fleetMergeDistance {
+		return false
+	}
+
+	firstHeadingX, firstHeadingY := normalizeVector(first.VX, first.VY)
+	secondHeadingX, secondHeadingY := normalizeVector(second.VX, second.VY)
+	if firstHeadingX == 0 && firstHeadingY == 0 {
+		return false
+	}
+	if secondHeadingX == 0 && secondHeadingY == 0 {
+		return false
+	}
+
+	return firstHeadingX*secondHeadingX+firstHeadingY*secondHeadingY >= fleetMergeHeadingDot
+}
+
+func mergeFleet(primary, secondary *Fleet) {
+	totalShips := primary.Ships + secondary.Ships
+	if totalShips <= 0 {
+		return
+	}
+
+	primary.X = weightedAverage(primary.X, float64(primary.Ships), secondary.X, float64(secondary.Ships))
+	primary.Y = weightedAverage(primary.Y, float64(primary.Ships), secondary.Y, float64(secondary.Ships))
+	primary.VX = weightedAverage(primary.VX, float64(primary.Ships), secondary.VX, float64(secondary.Ships))
+	primary.VY = weightedAverage(primary.VY, float64(primary.Ships), secondary.VY, float64(secondary.Ships))
+	primary.Ships = totalShips
+	if secondary.LaunchTick < primary.LaunchTick {
+		primary.LaunchTick = secondary.LaunchTick
+	}
+	if secondary.ETA < primary.ETA || primary.ETA == 0 {
+		primary.ETA = secondary.ETA
+	}
+	primary.VX, primary.VY = clampMagnitude(primary.VX, primary.VY, math.Hypot(primary.VX, primary.VY))
+}
+
+func weightedAverage(firstValue, firstWeight, secondValue, secondWeight float64) float64 {
+	weight := firstWeight + secondWeight
+	if weight == 0 {
+		return firstValue
+	}
+
+	return (firstValue*firstWeight + secondValue*secondWeight) / weight
+}
+
 func avoidanceRadius(planet *Planet) float64 {
 	return planet.Radius + fleetCollisionRadius + collisionPadding
 }
 
-func (engine *Engine) currentAvoidancePlanetLocked(fleet *Fleet, target *Planet) *Planet {
+func (engine *Engine) currentAvoidancePlanetLocked(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) *Planet {
 	if current := engine.planets[fleet.AvoidPlanetID]; current != nil && engine.shouldKeepAvoidingPlanetLocked(fleet, target, current) {
 		return current
 	}
 
-	blocking := engine.findBlockingPlanetLocked(fleet, target)
+	blocking := engine.findBlockingPlanetLocked(fleet, target, planetIndex)
 	if blocking == nil {
 		fleet.AvoidPlanetID = 0
 		fleet.AvoidClockwise = false
@@ -231,26 +353,42 @@ func (engine *Engine) shouldKeepAvoidingPlanetLocked(fleet *Fleet, target *Plane
 	return math.Hypot(fleet.X-obstacle.X, fleet.Y-obstacle.Y) < avoidanceRadius(obstacle)+planetInfluencePadding
 }
 
-func (engine *Engine) findBlockingPlanetLocked(fleet *Fleet, target *Planet) *Planet {
+func (engine *Engine) findBlockingPlanetLocked(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) *Planet {
 	var blocking *Planet
 	bestDistance := math.MaxFloat64
+	visitPlanet := func(planet *Planet) {
+		if planet == nil {
+			return
+		}
 
-	for _, planet := range engine.planets {
 		if planet.ID == fleet.SourceID || planet.ID == fleet.TargetID {
-			continue
+			return
 		}
 
 		if !segmentIntersectsCircle(fleet.X, fleet.Y, target.X, target.Y, planet, fleetCollisionRadius+avoidancePadding) {
-			continue
+			return
 		}
 
 		distance := math.Hypot(planet.X-fleet.X, planet.Y-fleet.Y)
 		if distance >= bestDistance {
-			continue
+			return
 		}
 
 		blocking = planet
 		bestDistance = distance
+	}
+
+	if planetIndex != nil {
+		padding := planetIndex.maxBlockingRadius
+		minX := math.Min(fleet.X, target.X) - padding
+		maxX := math.Max(fleet.X, target.X) + padding
+		minY := math.Min(fleet.Y, target.Y) - padding
+		maxY := math.Max(fleet.Y, target.Y) + padding
+		planetIndex.forEachInBounds(minX, maxX, minY, maxY, visitPlanet)
+	} else {
+		for _, planet := range engine.planets {
+			visitPlanet(planet)
+		}
 	}
 
 	return blocking
@@ -446,9 +584,60 @@ type fleetSpatialIndex struct {
 	cells    map[fleetSpatialCell][]*Fleet
 }
 
+type planetSpatialIndex struct {
+	cellSize           float64
+	maxBlockingRadius  float64
+	maxCollisionRadius float64
+	maxInfluenceRadius float64
+	cells              map[fleetSpatialCell][]*Planet
+}
+
 type fleetSpatialCell struct {
 	x int
 	y int
+}
+
+func newPlanetSpatialIndex(planets map[int]*Planet) *planetSpatialIndex {
+	maxBlockingRadius := 1.0
+	maxCollisionRadius := 1.0
+	maxInfluenceRadius := 1.0
+	for _, planet := range planets {
+		if planet == nil {
+			continue
+		}
+
+		blockingRadius := planet.Radius + fleetCollisionRadius + avoidancePadding
+		collisionRadius := avoidanceRadius(planet)
+		influenceRadius := collisionRadius + planetInfluencePadding
+		if blockingRadius > maxBlockingRadius {
+			maxBlockingRadius = blockingRadius
+		}
+		if collisionRadius > maxCollisionRadius {
+			maxCollisionRadius = collisionRadius
+		}
+		if influenceRadius > maxInfluenceRadius {
+			maxInfluenceRadius = influenceRadius
+		}
+	}
+
+	index := &planetSpatialIndex{
+		cellSize:           maxInfluenceRadius,
+		maxBlockingRadius:  maxBlockingRadius,
+		maxCollisionRadius: maxCollisionRadius,
+		maxInfluenceRadius: maxInfluenceRadius,
+		cells:              make(map[fleetSpatialCell][]*Planet, len(planets)),
+	}
+
+	for _, planet := range planets {
+		if planet == nil {
+			continue
+		}
+
+		cell := index.cellFor(planet.X, planet.Y)
+		index.cells[cell] = append(index.cells[cell], planet)
+	}
+
+	return index
 }
 
 func newFleetSpatialIndex(fleets map[int]*Fleet, cellSize float64) *fleetSpatialIndex {
@@ -493,6 +682,40 @@ func (index *fleetSpatialIndex) forEachNearby(x, y, radius float64, visit func(*
 }
 
 func (index *fleetSpatialIndex) cellFor(x, y float64) fleetSpatialCell {
+	return fleetSpatialCell{
+		x: int(math.Floor(x / index.cellSize)),
+		y: int(math.Floor(y / index.cellSize)),
+	}
+}
+
+func (index *planetSpatialIndex) forEachNearby(x, y, radius float64, visit func(*Planet)) {
+	if index == nil {
+		return
+	}
+
+	index.forEachInBounds(x-radius, x+radius, y-radius, y+radius, visit)
+}
+
+func (index *planetSpatialIndex) forEachInBounds(minX, maxX, minY, maxY float64, visit func(*Planet)) {
+	if index == nil {
+		return
+	}
+
+	minCellX := int(math.Floor(minX / index.cellSize))
+	maxCellX := int(math.Floor(maxX / index.cellSize))
+	minCellY := int(math.Floor(minY / index.cellSize))
+	maxCellY := int(math.Floor(maxY / index.cellSize))
+
+	for cellX := minCellX; cellX <= maxCellX; cellX++ {
+		for cellY := minCellY; cellY <= maxCellY; cellY++ {
+			for _, planet := range index.cells[fleetSpatialCell{x: cellX, y: cellY}] {
+				visit(planet)
+			}
+		}
+	}
+}
+
+func (index *planetSpatialIndex) cellFor(x, y float64) fleetSpatialCell {
 	return fleetSpatialCell{
 		x: int(math.Floor(x / index.cellSize)),
 		y: int(math.Floor(y / index.cellSize)),

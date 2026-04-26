@@ -50,6 +50,44 @@ func TestSendFleetSpawnsShipsAroundSourcePlanet(t *testing.T) {
 	}
 }
 
+func TestSendFleetBundlesLargeLaunchBeforeFirstTick(t *testing.T) {
+	engine := &Engine{
+		tickRate:   DefaultTickRate,
+		fleetSpeed: defaultFleetSpeedUPS,
+		planets: map[int]*Planet{
+			1: {ID: 1, X: 0, Y: 0, Radius: 15, Owner: 1, Ships: 2400},
+			2: {ID: 2, X: 600, Y: 0, Radius: 15, Owner: 0, Ships: 10},
+		},
+		fleets:      make(map[int]*Fleet),
+		nextFleetID: 1,
+		mapName:     "test",
+	}
+
+	_, err := engine.SendFleet(1, 1, 2, 100)
+	if err != nil {
+		t.Fatalf("send fleet: %v", err)
+	}
+
+	if len(engine.fleets) >= 2400 {
+		t.Fatalf("expected launch-time bundling to reduce spawned fleet count, got %d", len(engine.fleets))
+	}
+
+	maxBundleSize := launchFleetBundleSize(0, 2400)
+	foundBundledFleet := false
+	for _, fleet := range engine.fleets {
+		if fleet.Ships > maxBundleSize {
+			t.Fatalf("expected bundle size <= %d, got %d", maxBundleSize, fleet.Ships)
+		}
+		if fleet.Ships > 1 {
+			foundBundledFleet = true
+		}
+	}
+
+	if !foundBundledFleet {
+		t.Fatal("expected large launch to create bundled fleets before the first tick")
+	}
+}
+
 func TestFleetSlidesAroundIntermediatePlanet(t *testing.T) {
 	engine := &Engine{
 		tickRate:   DefaultTickRate,

@@ -10,25 +10,39 @@ const shipLaunchSpacing = 1.5
 
 const launchPositionTolerance = 0.001
 
+const planetGrowthIntervalSeconds = 2
+
 type Engine struct {
 	mu          sync.RWMutex
 	tick        int64
 	tickRate    int
 	fleetSpeed  float64
+	worldWidth  float64
+	worldHeight float64
 	planets     map[int]*Planet
+	planetIndex *planetSpatialIndex
 	fleets      map[int]*Fleet
 	nextFleetID int
 	mapName     string
 }
 
 func NewEngine() *Engine {
+	return NewEngineWithConfig(DefaultMapConfig())
+}
+
+func NewEngineWithConfig(config MapConfig) *Engine {
+	mapLayout := newRandomMapLayoutWithConfig(config)
+
 	return &Engine{
 		tickRate:    DefaultTickRate,
 		fleetSpeed:  defaultFleetSpeedUPS,
-		planets:     starterPlanets(),
+		worldWidth:  mapLayout.Width,
+		worldHeight: mapLayout.Height,
+		planets:     mapLayout.Planets,
+		planetIndex: newPlanetSpatialIndex(mapLayout.Planets),
 		fleets:      make(map[int]*Fleet),
 		nextFleetID: 1,
-		mapName:     "starter",
+		mapName:     mapLayout.Name,
 	}
 }
 
@@ -123,32 +137,40 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 	}
 
 	baseAngle := math.Atan2(launchDirectionY, launchDirectionX)
+	launchBundleSize := launchFleetBundleSize(len(engine.fleets), shipsToSend)
 	firstFleet := Fleet{}
 	remainingShips := shipsToSend
 	shipIndex := 0
 	for ringIndex := 0; remainingShips > 0; ringIndex++ {
 		ringRadius := launchOffset + float64(ringIndex)*shipLaunchSpacing
 		ringCapacity := maxShipsOnLaunchRing(ringRadius)
-		shipsInRing := remainingShips
-		if shipsInRing > ringCapacity {
-			shipsInRing = ringCapacity
+		bundlesInRing := remainingShips / launchBundleSize
+		if remainingShips%launchBundleSize != 0 {
+			bundlesInRing++
+		}
+		if bundlesInRing > ringCapacity {
+			bundlesInRing = ringCapacity
 		}
 
-		for ringSlot := 0; ringSlot < shipsInRing; ringSlot++ {
+		for ringSlot := 0; ringSlot < bundlesInRing && remainingShips > 0; ringSlot++ {
 			spawnAngle := baseAngle
-			if shipsInRing > 1 {
-				spawnAngle += 2 * math.Pi * float64(ringSlot) / float64(shipsInRing)
+			if bundlesInRing > 1 {
+				spawnAngle += 2 * math.Pi * float64(ringSlot) / float64(bundlesInRing)
 			}
 
 			spawnX := source.X + math.Cos(spawnAngle)*ringRadius
 			spawnY := source.Y + math.Sin(spawnAngle)*ringRadius
+			bundleShips := remainingShips
+			if bundleShips > launchBundleSize {
+				bundleShips = launchBundleSize
+			}
 
 			fleet := &Fleet{
 				ID:         engine.nextFleetID,
 				Owner:      playerID,
 				SourceID:   sourceID,
 				TargetID:   targetID,
-				Ships:      1,
+				Ships:      bundleShips,
 				LaunchTick: engine.tick,
 				ETA:        engine.tick + travelTicks,
 				X:          spawnX,
@@ -163,12 +185,20 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 			}
 			engine.nextFleetID++
 			shipIndex++
+			remainingShips -= bundleShips
 		}
-
-		remainingShips -= shipsInRing
 	}
 
 	return firstFleet, nil
+}
+
+func launchFleetBundleSize(currentFleetCount, shipsToSend int) int {
+	projectedFleetCount := currentFleetCount + shipsToSend
+	if projectedFleetCount < fleetMergeScaleStep {
+		return 1
+	}
+
+	return dynamicFleetMergeMaxShips(projectedFleetCount)
 }
 
 func maxShipsOnLaunchRing(radius float64) int {
@@ -191,6 +221,11 @@ func (engine *Engine) moveFleetsLocked() {
 	}
 	sort.Ints(fleetIDs)
 	steeringIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance+fleetInfluencePadding)
+	planetIndex := engine.planetIndex
+	if planetIndex == nil {
+		planetIndex = newPlanetSpatialIndex(engine.planets)
+		engine.planetIndex = planetIndex
+	}
 
 	for _, id := range fleetIDs {
 		fleet := engine.fleets[id]
@@ -203,29 +238,21 @@ func (engine *Engine) moveFleetsLocked() {
 			continue
 		}
 
-		engine.advanceFleetLocked(id, fleet, target, steeringIndex)
+		engine.advanceFleetLocked(id, fleet, target, steeringIndex, planetIndex)
 	}
 
 	collisionIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance)
 	engine.resolveFleetCollisionsLocked(collisionIndex)
-
-	for _, id := range fleetIDs {
-		fleet := engine.fleets[id]
-		if fleet == nil {
-			continue
-		}
-
-		target := engine.planets[fleet.TargetID]
-		if target == nil {
-			continue
-		}
-
-		fleet.ETA = engine.tick + engine.estimateRemainingTicksLocked(fleet, target)
-	}
+	engine.mergeFleetsLocked(collisionIndex)
 }
 
 func (engine *Engine) growPlanetsLocked() {
-	if engine.tick%int64(engine.tickRate) != 0 {
+	growthInterval := int64(engine.tickRate * planetGrowthIntervalSeconds)
+	if growthInterval < 1 {
+		growthInterval = 1
+	}
+
+	if engine.tick%growthInterval != 0 {
 		return
 	}
 
@@ -248,21 +275,6 @@ func (engine *Engine) travelVector(source, target *Planet) (float64, float64, fl
 	}
 
 	return travelSeconds, dx / travelSeconds, dy / travelSeconds
-}
-
-func (engine *Engine) estimateRemainingTicksLocked(fleet *Fleet, target *Planet) int64 {
-	distance := math.Hypot(target.X-fleet.X, target.Y-fleet.Y) - (target.Radius + fleetCollisionRadius)
-	if distance <= 0 {
-		return 0
-	}
-
-	travelSeconds := distance / engine.fleetSpeed
-	ticks := int64(math.Ceil(travelSeconds * float64(engine.tickRate)))
-	if ticks < 1 {
-		return 1
-	}
-
-	return ticks
 }
 
 func (engine *Engine) snapshotLocked() Snapshot {
@@ -302,6 +314,8 @@ func (engine *Engine) snapshotForPlayerLocked(playerID int) Snapshot {
 	return Snapshot{
 		Tick:     engine.tick,
 		TickRate: engine.tickRate,
+		Width:    engine.worldWidth,
+		Height:   engine.worldHeight,
 		Planets:  planets,
 		Fleets:   fleets,
 	}
