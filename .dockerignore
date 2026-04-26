@@ -1,0 +1,7 @@
+.git
+.gitignore
+server.log
+server.pid
+web/node_modules
+web/dist
+web/.assetpack
