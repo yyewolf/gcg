@@ -12,6 +12,8 @@ import (
 const (
 	lobbyCountdownDuration   = 10 * time.Second
 	lobbyWaitingPollInterval = 250 * time.Millisecond
+	lobbyIdleCleanupDuration = 30 * time.Second
+	minimumLobbyStartPlayers = 2
 )
 
 var errLobbyFull = errors.New("lobby is full")
@@ -27,15 +29,17 @@ type lobby struct {
 	clientOrder     []*client
 	engine          *game.Engine
 	countdownEndsAt time.Time
+	emptySince      time.Time
 }
 
 func newLobby(manager *lobbyManager, id string, order int, cancel context.CancelFunc) *lobby {
 	return &lobby{
-		manager: manager,
-		id:      id,
-		order:   order,
-		cancel:  cancel,
-		clients: make(map[*client]struct{}),
+		manager:    manager,
+		id:         id,
+		order:      order,
+		cancel:     cancel,
+		clients:    make(map[*client]struct{}),
+		emptySince: time.Now(),
 	}
 }
 
@@ -63,15 +67,19 @@ func (lobby *lobby) step() {
 	engine := lobby.engine
 	if engine != nil {
 		state := engine.Advance()
+		winnerID, hasWinner := engine.Winner()
 		lobby.mu.Unlock()
 		lobby.broadcastState(state.Tick)
+		if hasWinner {
+			lobby.finishGame(winnerID)
+		}
 		return
 	}
 
 	now := time.Now()
 	shouldBroadcastLobby := false
 	started := false
-	if len(lobby.clients) >= 1 {
+	if len(lobby.clients) >= minimumLobbyStartPlayers {
 		if lobby.countdownEndsAt.IsZero() {
 			lobby.countdownEndsAt = now.Add(lobbyCountdownDuration)
 			shouldBroadcastLobby = true
@@ -149,7 +157,8 @@ func (lobby *lobby) addClient(client *client) error {
 
 	lobby.clients[client] = struct{}{}
 	lobby.clientOrder = append(lobby.clientOrder, client)
-	if len(lobby.clients) >= 2 && lobby.countdownEndsAt.IsZero() {
+	lobby.emptySince = time.Time{}
+	if len(lobby.clients) >= minimumLobbyStartPlayers && lobby.countdownEndsAt.IsZero() {
 		lobby.countdownEndsAt = time.Now().Add(lobbyCountdownDuration)
 	}
 	return nil
@@ -169,7 +178,10 @@ func (lobby *lobby) removeClient(client *client) {
 			break
 		}
 	}
-	if lobby.engine == nil && len(lobby.clients) < 2 {
+	if len(lobby.clients) == 0 {
+		lobby.emptySince = time.Now()
+	}
+	if lobby.engine == nil && len(lobby.clients) < minimumLobbyStartPlayers {
 		lobby.countdownEndsAt = time.Time{}
 	}
 }
@@ -189,6 +201,33 @@ func (lobby *lobby) startGameLocked() {
 	for index, client := range players {
 		client.setPlayerID(index + 1)
 	}
+}
+
+func (lobby *lobby) finishGame(winnerID int) {
+	lobby.mu.Lock()
+	clients := make([]*client, 0, len(lobby.clientOrder))
+	for _, client := range lobby.clientOrder {
+		if _, ok := lobby.clients[client]; ok {
+			clients = append(clients, client)
+		}
+	}
+	lobby.clients = make(map[*client]struct{})
+	lobby.clientOrder = nil
+	lobby.engine = nil
+	lobby.countdownEndsAt = time.Time{}
+	lobby.emptySince = time.Now()
+	lobby.mu.Unlock()
+
+	for _, client := range clients {
+		client.setLobby(nil)
+		client.setPlayerID(0)
+		client.sendJSON(outboundMessage{Type: "gameover", Winner: winnerID})
+	}
+
+	lobby.manager.mu.Lock()
+	lobby.manager.ensureOpenLobbyLocked()
+	lobby.manager.mu.Unlock()
+	lobby.manager.broadcastLobbyStates()
 }
 
 func (lobby *lobby) engineInstance() *game.Engine {
@@ -303,6 +342,16 @@ func (lobby *lobby) isEmpty() bool {
 	lobby.mu.RLock()
 	defer lobby.mu.RUnlock()
 	return len(lobby.clients) == 0
+}
+
+func (lobby *lobby) isExpired(now time.Time) bool {
+	lobby.mu.RLock()
+	defer lobby.mu.RUnlock()
+	if len(lobby.clients) != 0 || lobby.emptySince.IsZero() {
+		return false
+	}
+
+	return now.Sub(lobby.emptySince) >= lobbyIdleCleanupDuration
 }
 
 func (lobby *lobby) stop() {

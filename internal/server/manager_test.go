@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/yyewolf/gcg/internal/game"
 )
@@ -48,20 +49,13 @@ func TestLobbySummariesStaySortedByCreationOrder(t *testing.T) {
 	manager := newLobbyManager()
 	defer manager.close()
 
-	manager.mu.RLock()
-	first := manager.lobbies["lobby-1"]
-	manager.mu.RUnlock()
-	if first == nil {
-		t.Fatal("expected initial lobby-1 to exist")
-	}
-
 	manager.mu.Lock()
-	ctx, cancel := context.WithCancel(manager.baseCtx)
+	_, cancel := context.WithCancel(manager.baseCtx)
+	manager.lobbies["lobby-1"] = newLobby(manager, "lobby-1", 1, cancel)
+	_, cancel = context.WithCancel(manager.baseCtx)
 	manager.lobbies["lobby-10"] = newLobby(manager, "lobby-10", 10, cancel)
-	go manager.lobbies["lobby-10"].run(ctx)
-	ctx, cancel = context.WithCancel(manager.baseCtx)
+	_, cancel = context.WithCancel(manager.baseCtx)
 	manager.lobbies["lobby-2"] = newLobby(manager, "lobby-2", 2, cancel)
-	go manager.lobbies["lobby-2"].run(ctx)
 	manager.mu.Unlock()
 
 	summaries := manager.lobbySummaries()
@@ -72,6 +66,119 @@ func TestLobbySummariesStaySortedByCreationOrder(t *testing.T) {
 	if summaries[0].ID != "lobby-1" || summaries[1].ID != "lobby-2" || summaries[2].ID != "lobby-10" {
 		t.Fatalf("expected creation order [lobby-1 lobby-2 lobby-10], got [%s %s %s]", summaries[0].ID, summaries[1].ID, summaries[2].ID)
 	}
+}
 
-	_ = first
+func TestCleanupLobbyWaitsForIdleTimeout(t *testing.T) {
+	t.Parallel()
+
+	manager := newLobbyManager()
+	defer manager.close()
+
+	_, cancel := context.WithCancel(manager.baseCtx)
+	defer cancel()
+	lobby := newLobby(manager, "lobby-1", 1, cancel)
+	manager.mu.Lock()
+	manager.lobbies[lobby.id] = lobby
+	manager.mu.Unlock()
+
+	manager.cleanupLobby(lobby)
+	manager.mu.RLock()
+	_, ok := manager.lobbies["lobby-1"]
+	manager.mu.RUnlock()
+	if !ok {
+		t.Fatal("expected empty lobby to survive before idle timeout")
+	}
+
+	lobby.mu.Lock()
+	lobby.emptySince = time.Now().Add(-lobbyIdleCleanupDuration)
+	lobby.mu.Unlock()
+
+	manager.cleanupLobby(lobby)
+	manager.mu.RLock()
+	_, ok = manager.lobbies["lobby-1"]
+	manager.mu.RUnlock()
+	if ok {
+		t.Fatal("expected idle empty lobby to be removed after timeout")
+	}
+}
+
+func TestLobbyCountdownNeedsTwoPlayers(t *testing.T) {
+	t.Parallel()
+
+	manager := newLobbyManager()
+	defer manager.close()
+
+	ctx, cancel := context.WithCancel(manager.baseCtx)
+	defer cancel()
+	lobby := newLobby(manager, "countdown-test", 99, cancel)
+	manager.mu.Lock()
+	manager.lobbies[lobby.id] = lobby
+	manager.mu.Unlock()
+	go lobby.run(ctx)
+
+	client := &client{manager: manager, send: make(chan []byte, 4)}
+	if err := lobby.addClient(client); err != nil {
+		t.Fatalf("add client: %v", err)
+	}
+
+	lobby.mu.Lock()
+	lobby.countdownEndsAt = time.Time{}
+	lobby.mu.Unlock()
+	lobby.step()
+
+	lobby.mu.RLock()
+	defer lobby.mu.RUnlock()
+	if !lobby.countdownEndsAt.IsZero() {
+		t.Fatal("expected countdown to stay idle with only one player")
+	}
+}
+
+func TestFinishGameRemovesPlayersFromLobby(t *testing.T) {
+	t.Parallel()
+
+	manager := newLobbyManager()
+	defer manager.close()
+
+	_, cancel := context.WithCancel(manager.baseCtx)
+	defer cancel()
+	lobby := newLobby(manager, "finish-test", 1, cancel)
+	manager.mu.Lock()
+	manager.clients = map[*client]struct{}{}
+	manager.lobbies[lobby.id] = lobby
+	manager.mu.Unlock()
+
+	first := &client{manager: manager, send: make(chan []byte, 2)}
+	second := &client{manager: manager, send: make(chan []byte, 2)}
+	manager.mu.Lock()
+	manager.clients[first] = struct{}{}
+	manager.clients[second] = struct{}{}
+	manager.mu.Unlock()
+	if err := lobby.addClient(first); err != nil {
+		t.Fatalf("add first client: %v", err)
+	}
+	if err := lobby.addClient(second); err != nil {
+		t.Fatalf("add second client: %v", err)
+	}
+	first.setLobby(lobby)
+	second.setLobby(lobby)
+
+	lobby.finishGame(1)
+
+	if first.currentLobby() != nil || second.currentLobby() != nil {
+		t.Fatal("expected clients to leave the finished lobby")
+	}
+	if !lobby.isEmpty() {
+		t.Fatal("expected finished lobby to have no remaining players")
+	}
+	if first.playerIDValue() != 0 || second.playerIDValue() != 0 {
+		t.Fatal("expected finished clients to lose their assigned player ids")
+	}
+	select {
+	case payload := <-first.send:
+		if string(payload) == "" {
+			t.Fatal("expected first client to receive a gameover payload")
+		}
+	default:
+		t.Fatal("expected first client to receive a gameover payload")
+	}
 }

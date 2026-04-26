@@ -219,3 +219,37 @@ func TestFleetChoosesShortestSideAroundOffsetPlanet(t *testing.T) {
 		})
 	}
 }
+
+func TestWinnerReturnsSoleRemainingOwner(t *testing.T) {
+	engine := &Engine{
+		planets: map[int]*Planet{
+			1: {ID: 1, Owner: 1, Ships: 10},
+			2: {ID: 2, Owner: 0, Ships: 5},
+		},
+		fleets: map[int]*Fleet{
+			1: {ID: 1, Owner: 1, Ships: 3},
+		},
+	}
+
+	winnerID, ok := engine.Winner()
+	if !ok {
+		t.Fatal("expected sole remaining owner to win")
+	}
+	if winnerID != 1 {
+		t.Fatalf("expected winner 1, got %d", winnerID)
+	}
+}
+
+func TestWinnerRequiresSingleRemainingOwner(t *testing.T) {
+	engine := &Engine{
+		planets: map[int]*Planet{
+			1: {ID: 1, Owner: 1, Ships: 10},
+			2: {ID: 2, Owner: 2, Ships: 10},
+		},
+		fleets: make(map[int]*Fleet),
+	}
+
+	if winnerID, ok := engine.Winner(); ok {
+		t.Fatalf("expected no winner while multiple owners remain, got %d", winnerID)
+	}
+}

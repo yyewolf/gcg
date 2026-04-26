@@ -63,6 +63,11 @@ export interface StateMessage {
   state: Snapshot;
 }
 
+export interface GameOverMessage {
+  t: "gameover";
+  winnerId: number;
+}
+
 export interface ErrorMessage {
   t: "error";
   error: string;
@@ -72,6 +77,7 @@ export type ServerMessage =
   | LobbyMessage
   | WelcomeMessage
   | StateMessage
+  | GameOverMessage
   | ErrorMessage;
 
 export interface JoinLobbyCommand {
@@ -321,6 +327,13 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       }
 
       return { t: "state", tick: parsed.tick, state };
+    }
+    case "gameover": {
+      if (!isNumber(parsed.winnerId)) {
+        return null;
+      }
+
+      return { t: "gameover", winnerId: parsed.winnerId };
     }
     case "error": {
       if (typeof parsed.error !== "string") {

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -54,8 +55,18 @@ func newLobbyManager() *lobbyManager {
 }
 
 func (manager *lobbyManager) run(ctx context.Context) {
-	<-ctx.Done()
-	manager.close()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			manager.close()
+			return
+		case now := <-ticker.C:
+			manager.reapIdleLobbies(now)
+		}
+	}
 }
 
 func (manager *lobbyManager) handleWS(writer http.ResponseWriter, request *http.Request) {
@@ -164,26 +175,38 @@ func (manager *lobbyManager) close() {
 		}
 		for _, client := range clients {
 			client.closeSend()
-			_ = client.conn.Close()
+			if client.conn != nil {
+				_ = client.conn.Close()
+			}
 		}
 	})
 }
 
 func (manager *lobbyManager) cleanupLobby(target *lobby) {
-	if target == nil || !target.isEmpty() {
+	if target == nil {
 		return
 	}
 
+	now := time.Now()
+	var toStop *lobby
 	manager.mu.Lock()
-	defer manager.mu.Unlock()
-	if current := manager.lobbies[target.id]; current == target && target.isEmpty() {
+	if current := manager.lobbies[target.id]; current == target && target.isExpired(now) {
 		delete(manager.lobbies, target.id)
-		target.stop()
+		toStop = target
 	}
 	manager.ensureOpenLobbyLocked()
+	manager.mu.Unlock()
+
+	if toStop != nil {
+		toStop.stop()
+	}
 }
 
 func (manager *lobbyManager) ensureOpenLobbyLocked() {
+	if len(manager.clients) == 0 {
+		return
+	}
+
 	for _, lobby := range manager.lobbies {
 		if lobby.isWaitingOpen() {
 			return
@@ -253,4 +276,23 @@ func (manager *lobbyManager) lobbySummaries() []lobbySummary {
 	}
 
 	return summaries
+}
+
+func (manager *lobbyManager) reapIdleLobbies(now time.Time) {
+	manager.mu.Lock()
+	toStop := make([]*lobby, 0)
+	for lobbyID, lobby := range manager.lobbies {
+		if !lobby.isExpired(now) {
+			continue
+		}
+
+		delete(manager.lobbies, lobbyID)
+		toStop = append(toStop, lobby)
+	}
+	manager.ensureOpenLobbyLocked()
+	manager.mu.Unlock()
+
+	for _, lobby := range toStop {
+		lobby.stop()
+	}
 }

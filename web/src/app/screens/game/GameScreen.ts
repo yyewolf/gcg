@@ -7,6 +7,7 @@ import {
   type GameClientEvent,
 } from "../../game/GameClient";
 import type {
+  GameOverMessage,
   LobbyMessage,
   LobbyStatus,
   LobbySummary,
@@ -19,10 +20,17 @@ import type {
 import { GameBoard } from "./scene/GameBoard";
 import { GameHud } from "./ui/GameHud";
 import { LobbyPanel } from "./ui/LobbyPanel";
+import {
+  GameResultPopup,
+  type GameResult,
+} from "../../popups/GameResultPopup";
 
 const PERCENTAGE_STEP = 10;
 
 export class GameScreen extends Container {
+  private readonly resultPopup = new GameResultPopup(() => {
+    void this.dismissResultPopup();
+  });
   private readonly lobbyPanel = new LobbyPanel({
     onJoinLobby: (lobbyID) => {
       this.client.joinLobby(lobbyID);
@@ -49,6 +57,7 @@ export class GameScreen extends Container {
   private lobbyCountdownMS: number | null = null;
   private lobbies: LobbySummary[] = [];
   private playerID: number | null = null;
+  private result: GameResult | null = null;
   private selectedSourceID: number | null = null;
   private sendPercentage = 50;
   private snapshot: Snapshot | null = null;
@@ -58,7 +67,7 @@ export class GameScreen extends Container {
 
   constructor() {
     super();
-    this.addChild(this.board, this.hud, this.lobbyPanel);
+    this.addChild(this.board, this.hud, this.lobbyPanel, this.resultPopup);
   }
 
   public prepare(): void {
@@ -90,6 +99,7 @@ export class GameScreen extends Container {
 
   public reset(): void {
     this.errorMessage = null;
+    this.result = null;
     this.selectedSourceID = null;
   }
 
@@ -97,6 +107,7 @@ export class GameScreen extends Container {
     this.board.resize(width, height);
     this.hud.resize(width, height);
     this.lobbyPanel.resize(width, height);
+    this.resultPopup.resize(width, height);
   }
 
   public update(time: Ticker): void {
@@ -127,6 +138,7 @@ export class GameScreen extends Container {
   private handleMessage(
     message:
       | LobbyMessage
+      | GameOverMessage
       | WelcomeMessage
       | StateMessage
       | { t: "error"; error: string },
@@ -134,6 +146,9 @@ export class GameScreen extends Container {
     switch (message.t) {
       case "lobby":
         this.applyLobbyState(message);
+        return;
+      case "gameover":
+        this.handleGameOver(message);
         return;
       case "welcome":
         this.playerID = message.playerId;
@@ -157,6 +172,30 @@ export class GameScreen extends Container {
     this.lobbyPlayers = message.lobbyPlayers;
     this.lobbyCountdownMS = message.countdownMs;
     this.lobbies = message.lobbies;
+    if (message.lobbyStatus !== "playing") {
+      this.snapshot = null;
+      this.playerID = null;
+      this.selectedSourceID = null;
+    }
+    this.render();
+  }
+
+  private handleGameOver(message: GameOverMessage): void {
+    const playerID = this.playerID;
+    this.snapshot = null;
+    this.playerID = null;
+    this.selectedSourceID = null;
+    this.errorMessage = null;
+    this.result =
+      playerID !== null && message.winnerId === playerID ? "win" : "lose";
+    this.resultPopup.setResult(this.result);
+    void this.resultPopup.present();
+    this.render();
+  }
+
+  private async dismissResultPopup(): Promise<void> {
+    await this.resultPopup.dismiss();
+    this.result = null;
     this.render();
   }
 
@@ -257,6 +296,7 @@ export class GameScreen extends Container {
     this.board.visible = inGame;
     this.hud.visible = inGame;
     this.lobbyPanel.visible = !inGame;
+    this.resultPopup.visible = this.result !== null;
     this.board.sync(
       inGame ? this.snapshot : null,
       this.playerID,

@@ -21,6 +21,7 @@ type lobbySummary struct {
 type outboundMessage struct {
 	Type          string         `json:"t"`
 	Player        int            `json:"playerId,omitempty"`
+	Winner        int            `json:"winnerId,omitempty"`
 	JoinedLobbyID string         `json:"joinedLobbyId,omitempty"`
 	LobbyStatus   string         `json:"lobbyStatus,omitempty"`
 	LobbyPlayers  int            `json:"lobbyPlayers,omitempty"`

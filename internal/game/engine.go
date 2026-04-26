@@ -89,6 +89,44 @@ func (engine *Engine) SnapshotForPlayer(playerID int) Snapshot {
 	return engine.snapshotForPlayerLocked(playerID)
 }
 
+func (engine *Engine) Winner() (int, bool) {
+	engine.mu.RLock()
+	defer engine.mu.RUnlock()
+
+	winnerID := 0
+	for _, planet := range engine.planets {
+		if planet.Owner == 0 {
+			continue
+		}
+		if winnerID == 0 {
+			winnerID = planet.Owner
+			continue
+		}
+		if planet.Owner != winnerID {
+			return 0, false
+		}
+	}
+
+	for _, fleet := range engine.fleets {
+		if fleet.Owner == 0 {
+			continue
+		}
+		if winnerID == 0 {
+			winnerID = fleet.Owner
+			continue
+		}
+		if fleet.Owner != winnerID {
+			return 0, false
+		}
+	}
+
+	if winnerID == 0 {
+		return 0, false
+	}
+
+	return winnerID, true
+}
+
 func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (Fleet, error) {
 	if percentage < 1 || percentage > 100 {
 		return Fleet{}, ErrInvalidPercentage
