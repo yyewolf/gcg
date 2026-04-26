@@ -42,17 +42,15 @@ export class PlanetView extends Container {
       fontWeight: "600",
     },
   });
-  private planetID = 0;
   private radius = 0;
   private selected = false;
   private pulse = 0;
   private readonly impacts: PlanetImpact[] = [];
 
-  constructor(onPlanetTap: (planetID: number) => void) {
+  constructor() {
     super();
 
-    this.eventMode = "static";
-    this.cursor = "pointer";
+    this.eventMode = "none";
     this.addChild(
       this.halo,
       this.body,
@@ -60,11 +58,9 @@ export class PlanetView extends Container {
       this.shipLabel,
       this.growthLabel,
     );
-    this.on("pointertap", () => onPlanetTap(this.planetID));
   }
 
   public sync(presentation: PlanetPresentation): void {
-    this.planetID = presentation.planet.id;
     this.radius = presentation.planet.r;
     this.selected = presentation.selected;
     this.position.set(presentation.planet.x, presentation.planet.y);

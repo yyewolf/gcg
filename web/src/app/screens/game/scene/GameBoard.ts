@@ -25,6 +25,12 @@ interface Star {
   alpha: number;
 }
 
+interface GameBoardCallbacks {
+  onClearSelection: () => void;
+  onPlanetActivate: (planetID: number, additive: boolean) => void;
+  onPlanetBoxSelect: (planetIDs: number[], additive: boolean) => void;
+}
+
 const showDebugFleetTrails = false;
 const minCameraZoom = 1;
 const maxCameraZoom = 3.5;
@@ -49,8 +55,10 @@ export class GameBoard extends Container {
   private readonly worldBackdrop = new Graphics();
   private readonly fleetLayer = new Container();
   private readonly planetLayer = new Container();
+  private readonly selectionOverlay = new Graphics();
   private readonly fleetViews = new Map<number, FleetView>();
   private readonly planetViews = new Map<number, PlanetView>();
+  private readonly currentPlanets = new Map<number, PlanetSnapshot>();
   private readonly previousFleets = new Map<number, FleetSnapshot>();
   private readonly previousPlanets = new Map<number, PlanetSnapshot>();
   private mapWidth = worldLayout.worldWidth;
@@ -63,19 +71,23 @@ export class GameBoard extends Container {
   private cameraPanY = 0;
   private fleetPredictionMS = 0;
   private fleetPredictionLimitMS = 100;
-  private pointerDown = false;
-  private dragActive = false;
+  private activePointerButton: number | null = null;
+  private panActive = false;
+  private selectionBoxActive = false;
+  private selectionAdditive = false;
   private dragStartX = 0;
   private dragStartY = 0;
   private dragLastX = 0;
   private dragLastY = 0;
+  private dragCurrentX = 0;
+  private dragCurrentY = 0;
 
-  constructor(private readonly onPlanetTap: (planetID: number) => void) {
+  constructor(private readonly callbacks: GameBoardCallbacks) {
     super();
 
     this.eventMode = "static";
     this.world.addChild(this.worldBackdrop, this.fleetLayer, this.planetLayer);
-    this.addChild(this.screenBackdrop, this.world);
+    this.addChild(this.screenBackdrop, this.world, this.selectionOverlay);
     this.on("pointerdown", this.handlePointerDown, this);
     this.on("globalpointermove", this.handlePointerMove, this);
     this.on("pointerup", this.handlePointerUp, this);
@@ -106,14 +118,16 @@ export class GameBoard extends Container {
   public sync(
     snapshot: Snapshot | null,
     playerID: number | null,
-    selectedSourceID: number | null,
+    selectedSourceIDs: ReadonlySet<number>,
   ): void {
     if (snapshot === null) {
-      this.syncPlanets([], playerID, selectedSourceID);
+      this.currentPlanets.clear();
+      this.syncPlanets([], playerID, selectedSourceIDs);
       this.syncFleets([], playerID);
       this.previousFleets.clear();
       this.previousPlanets.clear();
       this.fleetPredictionMS = 0;
+      this.clearSelectionBox();
       return;
     }
 
@@ -124,7 +138,7 @@ export class GameBoard extends Container {
       (1000 / Math.max(1, snapshot.tickRate)) * predictionLeadTicks,
     );
 
-    this.syncPlanets(snapshot.planets, playerID, selectedSourceID);
+    this.syncPlanets(snapshot.planets, playerID, selectedSourceIDs);
     this.syncLandingImpacts(snapshot.fleets, playerID);
     this.syncFleets(snapshot.fleets, playerID);
     this.previousPlanets.clear();
@@ -200,60 +214,192 @@ export class GameBoard extends Container {
   }
 
   private handlePointerDown(event: FederatedPointerEvent): void {
-    if (event.button !== 0) {
-      return;
-    }
     if (event.global.y < worldLayout.hudHeight) {
       return;
     }
 
-    this.pointerDown = true;
-    this.dragActive = false;
+    if (event.button !== 0 && event.button !== 2) {
+      return;
+    }
+
+    this.activePointerButton = event.button;
+    this.panActive = false;
+    this.selectionBoxActive = false;
+    this.selectionAdditive = this.isAdditiveSelection(event);
     this.dragStartX = event.global.x;
     this.dragStartY = event.global.y;
     this.dragLastX = event.global.x;
     this.dragLastY = event.global.y;
+    this.dragCurrentX = event.global.x;
+    this.dragCurrentY = event.global.y;
+
+    if (event.button === 2) {
+      this.cursor = "grabbing";
+      event.stopPropagation();
+    }
   }
 
   private handlePointerMove(event: FederatedPointerEvent): void {
-    if (!this.pointerDown) {
+    if (this.activePointerButton === null) {
       return;
     }
 
-    if (!this.dragActive) {
-      const dragDistanceX = event.global.x - this.dragStartX;
-      const dragDistanceY = event.global.y - this.dragStartY;
-      if (
-        dragDistanceX * dragDistanceX + dragDistanceY * dragDistanceY <
-        panDragThreshold * panDragThreshold
-      ) {
-        return;
+    const dragDistanceX = event.global.x - this.dragStartX;
+    const dragDistanceY = event.global.y - this.dragStartY;
+    const passedThreshold =
+      dragDistanceX * dragDistanceX + dragDistanceY * dragDistanceY >=
+      panDragThreshold * panDragThreshold;
+
+    if (this.activePointerButton === 2) {
+      if (!this.panActive) {
+        if (!passedThreshold) {
+          return;
+        }
+        this.panActive = true;
       }
 
-      this.dragActive = true;
-      this.cursor = "grabbing";
+      this.cameraPanX += event.global.x - this.dragLastX;
+      this.cameraPanY += event.global.y - this.dragLastY;
+      this.dragLastX = event.global.x;
+      this.dragLastY = event.global.y;
+      this.applyWorldTransform();
+      event.stopPropagation();
+      return;
     }
 
-    this.cameraPanX += event.global.x - this.dragLastX;
-    this.cameraPanY += event.global.y - this.dragLastY;
-    this.dragLastX = event.global.x;
-    this.dragLastY = event.global.y;
-    this.applyWorldTransform();
+    if (!this.selectionBoxActive && !passedThreshold) {
+      return;
+    }
+
+    this.selectionBoxActive = true;
+    this.dragCurrentX = event.global.x;
+    this.dragCurrentY = event.global.y;
+    this.drawSelectionBox();
     event.stopPropagation();
   }
 
   private handlePointerUp(event: FederatedPointerEvent): void {
-    if (!this.pointerDown) {
+    if (this.activePointerButton === null) {
       return;
     }
 
-    this.pointerDown = false;
-    const didDrag = this.dragActive;
-    this.dragActive = false;
+    const activeButton = this.activePointerButton;
+    const didPan = this.panActive;
+    const didSelect = this.selectionBoxActive;
+    const additive = this.selectionAdditive;
+    this.activePointerButton = null;
+    this.panActive = false;
+    this.selectionBoxActive = false;
+    this.selectionAdditive = false;
     this.cursor = "default";
-    if (didDrag) {
+
+    if (activeButton === 2) {
+      if (didPan) {
+        event.stopPropagation();
+      }
+      return;
+    }
+
+    if (didSelect) {
+      this.dragCurrentX = event.global.x;
+      this.dragCurrentY = event.global.y;
+      this.callbacks.onPlanetBoxSelect(
+        this.resolvePlanetsInSelectionBox(),
+        additive,
+      );
+      this.clearSelectionBox();
+      event.stopPropagation();
+      return;
+    }
+
+    const planetID = this.resolvePlanetAtScreen(event.global.x, event.global.y);
+    if (planetID !== null) {
+      this.callbacks.onPlanetActivate(planetID, additive);
+      event.stopPropagation();
+      return;
+    }
+
+    if (!additive) {
+      this.callbacks.onClearSelection();
       event.stopPropagation();
     }
+  }
+
+  private drawSelectionBox(): void {
+    const left = Math.min(this.dragStartX, this.dragCurrentX);
+    const top = Math.min(this.dragStartY, this.dragCurrentY);
+    const width = Math.abs(this.dragCurrentX - this.dragStartX);
+    const height = Math.abs(this.dragCurrentY - this.dragStartY);
+
+    this.selectionOverlay.clear();
+    this.selectionOverlay.roundRect(left, top, width, height, 10);
+    this.selectionOverlay.fill({ color: palette.friendly, alpha: 0.12 });
+    this.selectionOverlay.roundRect(left, top, width, height, 10);
+    this.selectionOverlay.stroke({
+      color: palette.friendly,
+      width: 2,
+      alpha: 0.82,
+    });
+  }
+
+  private clearSelectionBox(): void {
+    this.selectionOverlay.clear();
+  }
+
+  private resolvePlanetsInSelectionBox(): number[] {
+    const left = Math.min(this.dragStartX, this.dragCurrentX);
+    const right = Math.max(this.dragStartX, this.dragCurrentX);
+    const top = Math.min(this.dragStartY, this.dragCurrentY);
+    const bottom = Math.max(this.dragStartY, this.dragCurrentY);
+    const scale = this.world.scale.x;
+    const selectedIDs: number[] = [];
+
+    for (const planet of this.currentPlanets.values()) {
+      const screenX = this.world.position.x + planet.x * scale;
+      const screenY = this.world.position.y + planet.y * scale;
+      if (
+        screenX >= left &&
+        screenX <= right &&
+        screenY >= top &&
+        screenY <= bottom
+      ) {
+        selectedIDs.push(planet.id);
+      }
+    }
+
+    selectedIDs.sort((first, second) => first - second);
+    return selectedIDs;
+  }
+
+  private resolvePlanetAtScreen(x: number, y: number): number | null {
+    const scale = this.world.scale.x;
+    if (scale <= 0) {
+      return null;
+    }
+
+    const worldX = (x - this.world.position.x) / scale;
+    const worldY = (y - this.world.position.y) / scale;
+    let bestPlanetID: number | null = null;
+    let bestDistanceSquared = Number.POSITIVE_INFINITY;
+
+    for (const planet of this.currentPlanets.values()) {
+      const dx = worldX - planet.x;
+      const dy = worldY - planet.y;
+      const distanceSquared = dx * dx + dy * dy;
+      if (distanceSquared > planet.r * planet.r) {
+        continue;
+      }
+      if (distanceSquared < bestDistanceSquared) {
+        bestDistanceSquared = distanceSquared;
+        bestPlanetID = planet.id;
+      }
+    }
+
+    return bestPlanetID;
+  }
+
+  private isAdditiveSelection(event: FederatedPointerEvent): boolean {
+    return event.ctrlKey || event.metaKey;
   }
 
   private handleWheel(event: FederatedWheelEvent): void {
@@ -380,22 +526,24 @@ export class GameBoard extends Container {
   private syncPlanets(
     planets: PlanetSnapshot[],
     playerID: number | null,
-    selectedSourceID: number | null,
+    selectedSourceIDs: ReadonlySet<number>,
   ): void {
     const activeIDs = new Set<number>();
+    this.currentPlanets.clear();
 
     for (const planet of planets) {
       activeIDs.add(planet.id);
+      this.currentPlanets.set(planet.id, planet);
       let view = this.planetViews.get(planet.id);
       if (view === undefined) {
-        view = new PlanetView(this.onPlanetTap);
+        view = new PlanetView();
         this.planetViews.set(planet.id, view);
         this.planetLayer.addChild(view);
       }
 
       view.sync({
         planet,
-        selected: planet.id === selectedSourceID,
+        selected: selectedSourceIDs.has(planet.id),
         tone: this.resolveTone(planet.owner, playerID),
       });
     }

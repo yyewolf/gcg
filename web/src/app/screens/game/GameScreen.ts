@@ -20,10 +20,7 @@ import type {
 import { GameBoard } from "./scene/GameBoard";
 import { GameHud } from "./ui/GameHud";
 import { LobbyPanel } from "./ui/LobbyPanel";
-import {
-  GameResultPopup,
-  type GameResult,
-} from "../../popups/GameResultPopup";
+import { GameResultPopup, type GameResult } from "../../popups/GameResultPopup";
 
 const PERCENTAGE_STEP = 10;
 
@@ -37,9 +34,13 @@ export class GameScreen extends Container {
     },
     onReconnect: () => this.client.reconnect(),
   });
-  private readonly board = new GameBoard((planetID) =>
-    this.handlePlanetTap(planetID),
-  );
+  private readonly board = new GameBoard({
+    onClearSelection: () => this.clearSelection(),
+    onPlanetActivate: (planetID, additive) =>
+      this.handlePlanetActivate(planetID, additive),
+    onPlanetBoxSelect: (planetIDs, additive) =>
+      this.handlePlanetBoxSelect(planetIDs, additive),
+  });
   private readonly client = new GameClient();
   private readonly hud = new GameHud({
     onDecreasePercentage: () => this.adjustPercentage(-PERCENTAGE_STEP),
@@ -58,9 +59,12 @@ export class GameScreen extends Container {
   private lobbies: LobbySummary[] = [];
   private playerID: number | null = null;
   private result: GameResult | null = null;
-  private selectedSourceID: number | null = null;
+  private readonly selectedSourceIDs = new Set<number>();
   private sendPercentage = 50;
   private snapshot: Snapshot | null = null;
+  private readonly onContextMenu = (event: MouseEvent) => {
+    event.preventDefault();
+  };
   private readonly onKeyDown = (event: KeyboardEvent) => {
     this.handleKeyDown(event);
   };
@@ -76,6 +80,7 @@ export class GameScreen extends Container {
 
   public async show(): Promise<void> {
     window.addEventListener("keydown", this.onKeyDown);
+    window.addEventListener("contextmenu", this.onContextMenu);
     this.unsubscribe = this.client.subscribe((event) => {
       this.handleClientEvent(event);
     });
@@ -84,6 +89,7 @@ export class GameScreen extends Container {
 
   public async hide(): Promise<void> {
     window.removeEventListener("keydown", this.onKeyDown);
+    window.removeEventListener("contextmenu", this.onContextMenu);
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.client.disconnect();
@@ -100,7 +106,7 @@ export class GameScreen extends Container {
   public reset(): void {
     this.errorMessage = null;
     this.result = null;
-    this.selectedSourceID = null;
+    this.selectedSourceIDs.clear();
   }
 
   public resize(width: number, height: number): void {
@@ -175,7 +181,7 @@ export class GameScreen extends Container {
     if (message.lobbyStatus !== "playing") {
       this.snapshot = null;
       this.playerID = null;
-      this.selectedSourceID = null;
+      this.selectedSourceIDs.clear();
     }
     this.render();
   }
@@ -184,7 +190,7 @@ export class GameScreen extends Container {
     const playerID = this.playerID;
     this.snapshot = null;
     this.playerID = null;
-    this.selectedSourceID = null;
+    this.selectedSourceIDs.clear();
     this.errorMessage = null;
     this.result =
       playerID !== null && message.winnerId === playerID ? "win" : "lose";
@@ -203,21 +209,21 @@ export class GameScreen extends Container {
     this.snapshot = snapshot;
     this.errorMessage = null;
 
-    if (this.selectedSourceID !== null) {
-      const selected = this.findPlanet(this.selectedSourceID);
+    for (const planetID of Array.from(this.selectedSourceIDs)) {
+      const selected = this.findPlanet(planetID);
       if (
         selected === null ||
         selected.owner !== this.playerID ||
         selected.ships < 1
       ) {
-        this.selectedSourceID = null;
+        this.selectedSourceIDs.delete(planetID);
       }
     }
 
     this.render();
   }
 
-  private handlePlanetTap(planetID: number): void {
+  private handlePlanetActivate(planetID: number, additive: boolean): void {
     if (this.snapshot === null || this.playerID === null) {
       return;
     }
@@ -227,38 +233,111 @@ export class GameScreen extends Container {
       return;
     }
 
-    if (this.selectedSourceID === null) {
-      if (planet.owner !== this.playerID) {
-        this.errorMessage = "Pick one of your planets to launch a fleet.";
-        this.render();
+    if (additive) {
+      if (planet.owner !== this.playerID || planet.ships < 1) {
         return;
       }
 
-      this.selectedSourceID = planetID;
+      if (this.selectedSourceIDs.has(planetID)) {
+        this.selectedSourceIDs.delete(planetID);
+      } else {
+        this.selectedSourceIDs.add(planetID);
+      }
       this.errorMessage = null;
       this.render();
       return;
     }
 
-    if (planetID === this.selectedSourceID) {
-      this.selectedSourceID = null;
+    if (this.selectedSourceIDs.has(planetID)) {
+      if (this.selectedSourceIDs.size === 1) {
+        this.clearSelection();
+        return;
+      }
+
+      this.selectedSourceIDs.clear();
+      this.selectedSourceIDs.add(planetID);
+      this.errorMessage = null;
       this.render();
       return;
     }
 
-    if (
-      !this.client.sendFleet(
-        this.selectedSourceID,
-        planetID,
-        this.sendPercentage,
-      )
-    ) {
+    if (this.selectedSourceIDs.size > 0) {
+      if (!this.sendSelectedFleets(planetID)) {
+        return;
+      }
+
+      this.clearSelection(false);
+      this.errorMessage = null;
+      this.render();
       return;
     }
 
-    this.selectedSourceID = null;
+    if (planet.owner !== this.playerID || planet.ships < 1) {
+      this.errorMessage = "Pick one of your planets to launch a fleet.";
+      this.render();
+      return;
+    }
+
+    this.selectedSourceIDs.clear();
+    this.selectedSourceIDs.add(planetID);
     this.errorMessage = null;
     this.render();
+  }
+
+  private handlePlanetBoxSelect(planetIDs: number[], additive: boolean): void {
+    if (this.snapshot === null || this.playerID === null) {
+      return;
+    }
+
+    const nextSelection = additive
+      ? new Set(this.selectedSourceIDs)
+      : new Set<number>();
+
+    for (const planetID of planetIDs) {
+      const planet = this.findPlanet(planetID);
+      if (
+        planet !== null &&
+        planet.owner === this.playerID &&
+        planet.ships > 0
+      ) {
+        nextSelection.add(planetID);
+      }
+    }
+
+    this.selectedSourceIDs.clear();
+    for (const planetID of nextSelection) {
+      this.selectedSourceIDs.add(planetID);
+    }
+    this.errorMessage = null;
+    this.render();
+  }
+
+  private sendSelectedFleets(targetID: number): boolean {
+    let sentAny = false;
+
+    for (const sourceID of this.selectedSourceIDs) {
+      if (sourceID === targetID) {
+        continue;
+      }
+      if (!this.client.sendFleet(sourceID, targetID, this.sendPercentage)) {
+        return false;
+      }
+      sentAny = true;
+    }
+
+    return sentAny;
+  }
+
+  private clearSelection(render = true): void {
+    if (this.selectedSourceIDs.size === 0) {
+      return;
+    }
+
+    this.selectedSourceIDs.clear();
+    this.errorMessage = null;
+    if (render) {
+      this.render();
+    }
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
@@ -273,8 +352,7 @@ export class GameScreen extends Container {
     }
 
     if (event.key === "Escape") {
-      this.selectedSourceID = null;
-      this.render();
+      this.clearSelection();
       return;
     }
 
@@ -300,14 +378,10 @@ export class GameScreen extends Container {
     this.board.sync(
       inGame ? this.snapshot : null,
       this.playerID,
-      this.selectedSourceID,
+      this.selectedSourceIDs,
     );
 
     if (inGame) {
-      const selectedSource =
-        this.selectedSourceID === null
-          ? null
-          : this.findPlanet(this.selectedSourceID);
       this.hud.render({
         connectionStatus: this.connectionStatus,
         errorMessage: this.errorMessage,
@@ -315,7 +389,7 @@ export class GameScreen extends Container {
         mapName: this.mapName,
         planetCount: this.snapshot?.planets.length ?? 0,
         playerId: this.playerID,
-        selectedSourceText: this.describeSelection(selectedSource),
+        selectedSourceText: this.describeSelection(),
         sendPercentage: this.sendPercentage,
         tick: this.snapshot?.tick ?? null,
       });
@@ -333,12 +407,25 @@ export class GameScreen extends Container {
     });
   }
 
-  private describeSelection(selectedSource: PlanetSnapshot | null): string {
-    if (selectedSource === null) {
-      return "No launch origin selected. Click one of your planets to arm a fleet.";
+  private describeSelection(): string {
+    const selectedPlanets = Array.from(this.selectedSourceIDs)
+      .map((planetID) => this.findPlanet(planetID))
+      .filter((planet): planet is PlanetSnapshot => planet !== null);
+
+    if (selectedPlanets.length === 0) {
+      return "No launch origin selected. Click to select, Ctrl-click to add, or drag a selection box.";
     }
 
-    return `Source planet ${selectedSource.id} armed with ${selectedSource.ships} ships. Select a target to launch ${this.sendPercentage}%.`;
+    if (selectedPlanets.length === 1) {
+      const [selectedSource] = selectedPlanets;
+      return `Source planet ${selectedSource.id} armed with ${selectedSource.ships} ships. Select a target to launch ${this.sendPercentage}%.`;
+    }
+
+    const totalShips = selectedPlanets.reduce(
+      (sum, planet) => sum + planet.ships,
+      0,
+    );
+    return `${selectedPlanets.length} planets selected with ${totalShips} ships total. Select a target to launch ${this.sendPercentage}% from each.`;
   }
 
   private findPlanet(planetID: number): PlanetSnapshot | null {
