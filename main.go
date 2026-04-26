@@ -7,10 +7,8 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
-	"github.com/yyewolf/gcg/internal/game"
 	"github.com/yyewolf/gcg/internal/server"
 )
 
@@ -21,22 +19,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	config := game.DefaultMapConfig()
-	if rawPlayerCount := os.Getenv("GCG_PLAYERS"); rawPlayerCount != "" {
-		playerCount, err := strconv.Atoi(rawPlayerCount)
-		if err != nil {
-			log.Printf("invalid GCG_PLAYERS value %q, using default %d", rawPlayerCount, config.PlayerCount)
-		} else {
-			config.PlayerCount = playerCount
-		}
-	}
-
 	staticFS, err := fs.Sub(webAssets, "web/dist")
 	if err != nil {
 		log.Fatalf("load embedded assets: %v", err)
 	}
 
-	server := server.New(":8080", staticFS, game.NewEngineWithConfig(config))
+	server := server.New(":8080", staticFS)
 	if err := server.Run(ctx); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}

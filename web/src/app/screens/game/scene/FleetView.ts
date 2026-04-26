@@ -6,8 +6,8 @@ import { palette } from "../theme";
 
 const maxTrailPoints = 24;
 const minTrailPointDistance = 4;
-const shipLength = 4.5;
-const shipHalfWidth = 2.4;
+const shipLength = 9;
+const shipHalfWidth = 4.8;
 
 interface TrailPoint {
   x: number;

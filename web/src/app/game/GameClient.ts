@@ -1,4 +1,5 @@
 import {
+  type JoinLobbyCommand,
   parseServerMessage,
   type SendFleetCommand,
   type ServerMessage,
@@ -96,6 +97,20 @@ export class GameClient {
     }
 
     const command: SendFleetCommand = { t: "send", src, dst, pct };
+    this.socket.send(JSON.stringify(command));
+    return true;
+  }
+
+  public joinLobby(lobby: string): boolean {
+    if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
+      this.emit({
+        type: "error",
+        message: "Connection is not ready yet.",
+      });
+      return false;
+    }
+
+    const command: JoinLobbyCommand = { t: "join", lobby };
     this.socket.send(JSON.stringify(command));
     return true;
   }

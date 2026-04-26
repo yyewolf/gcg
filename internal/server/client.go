@@ -3,21 +3,25 @@ package server
 import (
 	"encoding/json"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 type client struct {
-	hub      *hub
+	manager  *lobbyManager
+	mu       sync.RWMutex
+	lobby    *lobby
 	conn     *websocket.Conn
 	playerID int
 	send     chan []byte
+	closed   bool
 }
 
 func (client *client) readLoop() {
 	defer func() {
-		client.hub.unregister(client)
+		client.manager.unregister(client)
 		_ = client.conn.Close()
 	}()
 
@@ -30,13 +34,30 @@ func (client *client) readLoop() {
 		}
 
 		switch command.Type {
+		case "join":
+			if err := client.manager.joinLobby(client, command.Lobby); err != nil {
+				client.sendJSON(outboundMessage{Type: "error", Error: err.Error()})
+			}
+			continue
 		case "send":
-			if _, err := client.hub.engine.SendFleet(client.playerID, command.Source, command.Target, command.Pct); err != nil {
+			lobby := client.currentLobby()
+			if lobby == nil {
+				client.sendJSON(outboundMessage{Type: "error", Error: "join a lobby first"})
+				continue
+			}
+
+			engine := lobby.engineInstance()
+			if engine == nil {
+				client.sendJSON(outboundMessage{Type: "error", Error: "match has not started yet"})
+				continue
+			}
+
+			if _, err := engine.SendFleet(client.playerIDValue(), command.Source, command.Target, command.Pct); err != nil {
 				client.sendJSON(outboundMessage{Type: "error", Error: err.Error()})
 				continue
 			}
 
-			client.hub.broadcastState(client.hub.engine.Tick())
+			lobby.broadcastState(engine.Tick())
 		default:
 			client.sendJSON(outboundMessage{Type: "error", Error: "unknown command"})
 		}
@@ -67,7 +88,7 @@ func (client *client) writeLoop() {
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
-		case <-client.hub.closed:
+		case <-client.manager.closed:
 			return
 		}
 	}
@@ -80,19 +101,57 @@ func (client *client) sendJSON(payload outboundMessage) {
 		return
 	}
 
-	client.hub.mu.RLock()
-	_, ok := client.hub.clients[client]
-	if !ok {
-		client.hub.mu.RUnlock()
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.closed {
 		return
 	}
 
 	select {
 	case client.send <- encoded:
 	default:
-		client.hub.mu.RUnlock()
-		go client.hub.unregister(client)
+		go client.manager.unregister(client)
 		return
 	}
-	client.hub.mu.RUnlock()
+}
+
+func (client *client) currentLobby() *lobby {
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+
+	return client.lobby
+}
+
+func (client *client) setLobby(nextLobby *lobby) {
+	client.mu.Lock()
+	client.lobby = nextLobby
+	if nextLobby == nil {
+		client.playerID = 0
+	}
+	client.mu.Unlock()
+}
+
+func (client *client) setPlayerID(playerID int) {
+	client.mu.Lock()
+	client.playerID = playerID
+	client.mu.Unlock()
+}
+
+func (client *client) playerIDValue() int {
+	client.mu.RLock()
+	defer client.mu.RUnlock()
+
+	return client.playerID
+}
+
+func (client *client) closeSend() bool {
+	client.mu.Lock()
+	defer client.mu.Unlock()
+	if client.closed {
+		return false
+	}
+
+	client.closed = true
+	close(client.send)
+	return true
 }

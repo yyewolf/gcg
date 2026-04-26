@@ -7,6 +7,9 @@ import {
   type GameClientEvent,
 } from "../../game/GameClient";
 import type {
+  LobbyMessage,
+  LobbyStatus,
+  LobbySummary,
   PlanetSnapshot,
   Snapshot,
   WelcomeMessage,
@@ -15,10 +18,17 @@ import type {
 
 import { GameBoard } from "./scene/GameBoard";
 import { GameHud } from "./ui/GameHud";
+import { LobbyPanel } from "./ui/LobbyPanel";
 
 const PERCENTAGE_STEP = 10;
 
 export class GameScreen extends Container {
+  private readonly lobbyPanel = new LobbyPanel({
+    onJoinLobby: (lobbyID) => {
+      this.client.joinLobby(lobbyID);
+    },
+    onReconnect: () => this.client.reconnect(),
+  });
   private readonly board = new GameBoard((planetID) =>
     this.handlePlanetTap(planetID),
   );
@@ -33,6 +43,11 @@ export class GameScreen extends Container {
   private connectionStatus: ConnectionStatus = "idle";
   private errorMessage: string | null = null;
   private mapName = "sector";
+  private lobbyStatus: LobbyStatus | null = null;
+  private joinedLobbyId: string | null = null;
+  private lobbyPlayers = 0;
+  private lobbyCountdownMS: number | null = null;
+  private lobbies: LobbySummary[] = [];
   private playerID: number | null = null;
   private selectedSourceID: number | null = null;
   private sendPercentage = 50;
@@ -43,7 +58,7 @@ export class GameScreen extends Container {
 
   constructor() {
     super();
-    this.addChild(this.board, this.hud);
+    this.addChild(this.board, this.hud, this.lobbyPanel);
   }
 
   public prepare(): void {
@@ -81,10 +96,11 @@ export class GameScreen extends Container {
   public resize(width: number, height: number): void {
     this.board.resize(width, height);
     this.hud.resize(width, height);
+    this.lobbyPanel.resize(width, height);
   }
 
   public update(time: Ticker): void {
-    if (!this.paused) {
+    if (!this.paused && this.snapshot !== null) {
       this.board.update(time.deltaMS);
     }
   }
@@ -109,9 +125,16 @@ export class GameScreen extends Container {
   }
 
   private handleMessage(
-    message: WelcomeMessage | StateMessage | { t: "error"; error: string },
+    message:
+      | LobbyMessage
+      | WelcomeMessage
+      | StateMessage
+      | { t: "error"; error: string },
   ): void {
     switch (message.t) {
+      case "lobby":
+        this.applyLobbyState(message);
+        return;
       case "welcome":
         this.playerID = message.playerId;
         this.mapName = message.map;
@@ -126,6 +149,15 @@ export class GameScreen extends Container {
         this.render();
         return;
     }
+  }
+
+  private applyLobbyState(message: LobbyMessage): void {
+    this.joinedLobbyId = message.joinedLobbyId;
+    this.lobbyStatus = message.lobbyStatus;
+    this.lobbyPlayers = message.lobbyPlayers;
+    this.lobbyCountdownMS = message.countdownMs;
+    this.lobbies = message.lobbies;
+    this.render();
   }
 
   private applySnapshot(snapshot: Snapshot): void {
@@ -221,22 +253,43 @@ export class GameScreen extends Container {
   }
 
   private render(): void {
-    this.board.sync(this.snapshot, this.playerID, this.selectedSourceID);
+    const inGame = this.snapshot !== null && this.playerID !== null;
+    this.board.visible = inGame;
+    this.hud.visible = inGame;
+    this.lobbyPanel.visible = !inGame;
+    this.board.sync(
+      inGame ? this.snapshot : null,
+      this.playerID,
+      this.selectedSourceID,
+    );
 
-    const selectedSource =
-      this.selectedSourceID === null
-        ? null
-        : this.findPlanet(this.selectedSourceID);
-    this.hud.render({
+    if (inGame) {
+      const selectedSource =
+        this.selectedSourceID === null
+          ? null
+          : this.findPlanet(this.selectedSourceID);
+      this.hud.render({
+        connectionStatus: this.connectionStatus,
+        errorMessage: this.errorMessage,
+        fleetCount: this.snapshot?.fleets.length ?? 0,
+        mapName: this.mapName,
+        planetCount: this.snapshot?.planets.length ?? 0,
+        playerId: this.playerID,
+        selectedSourceText: this.describeSelection(selectedSource),
+        sendPercentage: this.sendPercentage,
+        tick: this.snapshot?.tick ?? null,
+      });
+      return;
+    }
+
+    this.lobbyPanel.render({
       connectionStatus: this.connectionStatus,
       errorMessage: this.errorMessage,
-      fleetCount: this.snapshot?.fleets.length ?? 0,
-      mapName: this.mapName,
-      planetCount: this.snapshot?.planets.length ?? 0,
-      playerId: this.playerID,
-      selectedSourceText: this.describeSelection(selectedSource),
-      sendPercentage: this.sendPercentage,
-      tick: this.snapshot?.tick ?? null,
+      joinedLobbyId: this.joinedLobbyId,
+      lobbyStatus: this.lobbyStatus,
+      lobbyPlayers: this.lobbyPlayers,
+      countdownMs: this.lobbyCountdownMS,
+      lobbies: this.lobbies,
     });
   }
 

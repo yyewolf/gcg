@@ -29,6 +29,25 @@ export interface Snapshot {
   fleets: FleetSnapshot[];
 }
 
+export type LobbyStatus = "waiting" | "countdown" | "playing";
+
+export interface LobbySummary {
+  id: string;
+  players: number;
+  maxPlayers: number;
+  status: LobbyStatus;
+  countdownMs: number | null;
+}
+
+export interface LobbyMessage {
+  t: "lobby";
+  joinedLobbyId: string | null;
+  lobbyStatus: LobbyStatus | null;
+  lobbyPlayers: number;
+  countdownMs: number | null;
+  lobbies: LobbySummary[];
+}
+
 export interface WelcomeMessage {
   t: "welcome";
   playerId: number;
@@ -49,7 +68,16 @@ export interface ErrorMessage {
   error: string;
 }
 
-export type ServerMessage = WelcomeMessage | StateMessage | ErrorMessage;
+export type ServerMessage =
+  | LobbyMessage
+  | WelcomeMessage
+  | StateMessage
+  | ErrorMessage;
+
+export interface JoinLobbyCommand {
+  t: "join";
+  lobby: string;
+}
 
 export interface SendFleetCommand {
   t: "send";
@@ -64,6 +92,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
+}
+
+function isLobbyStatus(value: unknown): value is LobbyStatus {
+  return value === "waiting" || value === "countdown" || value === "playing";
 }
 
 function parsePlanet(value: unknown): PlanetSnapshot | null {
@@ -108,6 +140,38 @@ function parseFleet(value: unknown): FleetSnapshot | null {
   }
 
   return { id, owner, src, dst, ships, x, y, vx, vy };
+}
+
+function parseLobbySummary(value: unknown): LobbySummary | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const { id, players, maxPlayers, status, countdownMs } = value;
+  if (
+    typeof id !== "string" ||
+    !isNumber(players) ||
+    !isNumber(maxPlayers) ||
+    !isLobbyStatus(status)
+  ) {
+    return null;
+  }
+
+  if (
+    countdownMs !== undefined &&
+    countdownMs !== null &&
+    !isNumber(countdownMs)
+  ) {
+    return null;
+  }
+
+  return {
+    id,
+    players,
+    maxPlayers,
+    status,
+    countdownMs: countdownMs ?? null,
+  };
 }
 
 function parseSnapshot(value: unknown): Snapshot | null {
@@ -170,6 +234,58 @@ export function parseServerMessage(raw: string): ServerMessage | null {
   }
 
   switch (parsed.t) {
+    case "lobby": {
+      if (!Array.isArray(parsed.lobbies)) {
+        return null;
+      }
+
+      if (
+        parsed.joinedLobbyId !== undefined &&
+        parsed.joinedLobbyId !== null &&
+        typeof parsed.joinedLobbyId !== "string"
+      ) {
+        return null;
+      }
+      if (
+        parsed.lobbyStatus !== undefined &&
+        parsed.lobbyStatus !== null &&
+        !isLobbyStatus(parsed.lobbyStatus)
+      ) {
+        return null;
+      }
+      if (
+        parsed.lobbyPlayers !== undefined &&
+        parsed.lobbyPlayers !== null &&
+        !isNumber(parsed.lobbyPlayers)
+      ) {
+        return null;
+      }
+      if (
+        parsed.countdownMs !== undefined &&
+        parsed.countdownMs !== null &&
+        !isNumber(parsed.countdownMs)
+      ) {
+        return null;
+      }
+
+      const lobbies: LobbySummary[] = [];
+      for (const lobby of parsed.lobbies) {
+        const parsedLobby = parseLobbySummary(lobby);
+        if (parsedLobby === null) {
+          return null;
+        }
+        lobbies.push(parsedLobby);
+      }
+
+      return {
+        t: "lobby",
+        joinedLobbyId: parsed.joinedLobbyId ?? null,
+        lobbyStatus: parsed.lobbyStatus ?? null,
+        lobbyPlayers: parsed.lobbyPlayers ?? 0,
+        countdownMs: parsed.countdownMs ?? null,
+        lobbies,
+      };
+    }
     case "welcome": {
       if (
         !isNumber(parsed.playerId) ||

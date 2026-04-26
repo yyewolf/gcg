@@ -6,23 +6,21 @@ import (
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/yyewolf/gcg/internal/game"
 )
 
 type Server struct {
-	hub  *hub
-	http *http.Server
+	manager *lobbyManager
+	http    *http.Server
 }
 
-func New(address string, assets fs.FS, engine *game.Engine) *Server {
-	hub := newHub(engine)
+func New(address string, assets fs.FS) *Server {
+	manager := newLobbyManager()
 	mux := http.NewServeMux()
-	mux.HandleFunc("/ws", hub.handleWS)
+	mux.HandleFunc("/ws", manager.handleWS)
 	mux.Handle("/", http.FileServer(http.FS(assets)))
 
 	return &Server{
-		hub: hub,
+		manager: manager,
 		http: &http.Server{
 			Addr:              address,
 			Handler:           mux,
@@ -32,7 +30,7 @@ func New(address string, assets fs.FS, engine *game.Engine) *Server {
 }
 
 func (server *Server) Run(ctx context.Context) error {
-	go server.hub.run(ctx)
+	go server.manager.run(ctx)
 
 	go func() {
 		<-ctx.Done()

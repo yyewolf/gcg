@@ -13,6 +13,7 @@ const (
 	fleetTurnRateRadians     = 7.2
 	fleetMergeDistance       = 12.0
 	fleetMergeHeadingDot     = 0.985
+	fleetMergeActivationStep = 500
 	baseFleetMergeMaxShips   = 2
 	maxFleetMergeMaxShips    = 32
 	fleetMergeScaleStep      = 600
@@ -258,6 +259,10 @@ func (engine *Engine) resolveArrivalLocked(id int, fleet *Fleet, target *Planet)
 }
 
 func dynamicFleetMergeMaxShips(fleetCount int) int {
+	if fleetCount < fleetMergeActivationStep {
+		return 1
+	}
+
 	mergeMaxShips := baseFleetMergeMaxShips
 	if fleetCount > 0 {
 		mergeMaxShips += fleetCount / fleetMergeScaleStep

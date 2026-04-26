@@ -199,7 +199,7 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 
 func launchFleetBundleSize(currentFleetCount, shipsToSend int) int {
 	projectedFleetCount := currentFleetCount + shipsToSend
-	if projectedFleetCount < fleetMergeScaleStep {
+	if projectedFleetCount < fleetMergeActivationStep {
 		return 1
 	}
 
