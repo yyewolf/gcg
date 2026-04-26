@@ -1,0 +1,34 @@
+package game
+
+type Planet struct {
+	ID     int     `json:"id"`
+	X      float64 `json:"x"`
+	Y      float64 `json:"y"`
+	Radius float64 `json:"r"`
+	Owner  int     `json:"owner"`
+	Ships  int     `json:"ships"`
+	Growth int     `json:"growth"`
+}
+
+type Fleet struct {
+	ID             int     `json:"id"`
+	Owner          int     `json:"owner"`
+	SourceID       int     `json:"src"`
+	TargetID       int     `json:"dst"`
+	Ships          int     `json:"ships"`
+	LaunchTick     int64   `json:"startTick"`
+	ETA            int64   `json:"endTick"`
+	X              float64 `json:"x"`
+	Y              float64 `json:"y"`
+	VX             float64 `json:"vx"`
+	VY             float64 `json:"vy"`
+	AvoidPlanetID  int     `json:"-"`
+	AvoidClockwise bool    `json:"-"`
+}
+
+type Snapshot struct {
+	Tick     int64    `json:"tick"`
+	TickRate int      `json:"tickRate"`
+	Planets  []Planet `json:"planets"`
+	Fleets   []Fleet  `json:"fleets"`
+}
