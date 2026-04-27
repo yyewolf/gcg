@@ -34,6 +34,11 @@ func (client *client) readLoop() {
 		}
 
 		switch command.Type {
+		case "play":
+			if err := client.manager.play(client); err != nil {
+				client.sendJSON(outboundMessage{Type: "error", Error: err.Error()})
+			}
+			continue
 		case "join":
 			if err := client.manager.joinLobby(client, command.Lobby); err != nil {
 				client.sendJSON(outboundMessage{Type: "error", Error: err.Error()})

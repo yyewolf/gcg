@@ -84,12 +84,45 @@ func (manager *lobbyManager) handleWS(writer http.ResponseWriter, request *http.
 
 	manager.mu.Lock()
 	manager.clients[client] = struct{}{}
-	manager.ensureOpenLobbyLocked()
+	createdLobby := manager.ensureOpenLobbyLocked()
 	manager.mu.Unlock()
 
 	go client.writeLoop()
 	manager.sendLobbyState(client)
+	if createdLobby {
+		manager.broadcastLobbyStates()
+	}
 	go client.readLoop()
+}
+
+func (manager *lobbyManager) play(client *client) error {
+	manager.mu.RLock()
+	var target *lobby
+	for _, lobby := range manager.lobbies {
+		if !lobby.isPlaying() {
+			target = lobby
+			break
+		}
+	}
+	manager.mu.RUnlock()
+	if target == nil {
+		manager.mu.Lock()
+		manager.ensureOpenLobbyLocked()
+		manager.mu.Unlock()
+		manager.mu.RLock()
+		for _, lobby := range manager.lobbies {
+			if !lobby.isPlaying() {
+				target = lobby
+				break
+			}
+		}
+		manager.mu.RUnlock()
+	}
+	if target == nil {
+		return errUnknownLobby
+	}
+
+	return manager.joinLobby(client, target.id)
 }
 
 func (manager *lobbyManager) joinLobby(client *client, lobbyID string) error {
@@ -194,22 +227,25 @@ func (manager *lobbyManager) cleanupLobby(target *lobby) {
 		delete(manager.lobbies, target.id)
 		toStop = target
 	}
-	manager.ensureOpenLobbyLocked()
+	createdLobby := manager.ensureOpenLobbyLocked()
 	manager.mu.Unlock()
 
 	if toStop != nil {
 		toStop.stop()
 	}
+	if toStop != nil || createdLobby {
+		manager.broadcastLobbyStates()
+	}
 }
 
-func (manager *lobbyManager) ensureOpenLobbyLocked() {
+func (manager *lobbyManager) ensureOpenLobbyLocked() bool {
 	if len(manager.clients) == 0 {
-		return
+		return false
 	}
 
 	for _, lobby := range manager.lobbies {
 		if lobby.isWaitingOpen() {
-			return
+			return false
 		}
 	}
 
@@ -220,6 +256,7 @@ func (manager *lobbyManager) ensureOpenLobbyLocked() {
 	entry := newLobby(manager, lobbyID, order, cancel)
 	manager.lobbies[lobbyID] = entry
 	go entry.run(ctx)
+	return true
 }
 
 func (manager *lobbyManager) broadcastLobbyStates() {
@@ -294,5 +331,8 @@ func (manager *lobbyManager) reapIdleLobbies(now time.Time) {
 
 	for _, lobby := range toStop {
 		lobby.stop()
+	}
+	if len(toStop) > 0 {
+		manager.broadcastLobbyStates()
 	}
 }

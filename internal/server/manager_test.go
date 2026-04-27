@@ -182,3 +182,54 @@ func TestFinishGameRemovesPlayersFromLobby(t *testing.T) {
 		t.Fatal("expected first client to receive a gameover payload")
 	}
 }
+
+func TestPlayJoinsAvailableLobby(t *testing.T) {
+	t.Parallel()
+
+	manager := newLobbyManager()
+	defer manager.close()
+
+	player := &client{manager: manager, send: make(chan []byte, 4)}
+	manager.mu.Lock()
+	manager.clients[player] = struct{}{}
+	manager.ensureOpenLobbyLocked()
+	manager.mu.Unlock()
+
+	if err := manager.play(player); err != nil {
+		t.Fatalf("play: %v", err)
+	}
+
+	current := player.currentLobby()
+	if current == nil {
+		t.Fatal("expected play to join a lobby")
+	}
+
+	joinedID, status, players, _, playing := current.clientLobbyState()
+	if joinedID == "" {
+		t.Fatal("expected joined lobby id to be set")
+	}
+	if status != "waiting" && status != "countdown" {
+		t.Fatalf("expected waiting or countdown lobby status, got %q", status)
+	}
+	if players != 1 {
+		t.Fatalf("expected lobby to contain 1 player, got %d", players)
+	}
+	if playing {
+		t.Fatal("expected quick-play target lobby not to be in-game")
+	}
+	select {
+	case payload := <-player.send:
+		if string(payload) == "" {
+			t.Fatal("expected play to enqueue a lobby update")
+		}
+	default:
+		t.Fatal("expected play to enqueue a lobby update")
+	}
+
+	if err := manager.play(player); err != nil {
+		t.Fatalf("play same lobby: %v", err)
+	}
+	if player.currentLobby() != current {
+		t.Fatal("expected play to keep the player in the same available lobby")
+	}
+}

@@ -20,7 +20,7 @@ interface BattlePlanet {
 }
 
 interface LobbyPanelCallbacks {
-  onJoinLobby: (lobbyID: string) => void;
+  onPlay: () => void;
   onReconnect: () => void;
 }
 
@@ -47,7 +47,7 @@ export class LobbyPanel extends Container {
   private readonly headerBand = new Graphics();
   private readonly listFrame = new Graphics();
   private readonly titleKicker = new Text({
-    text: "TACTICAL MATCHMAKING",
+    text: "",
     anchor: 0.5,
     style: {
       fill: palette.accent,
@@ -58,7 +58,7 @@ export class LobbyPanel extends Container {
     },
   });
   private readonly title = new Text({
-    text: "Fleet Lobby",
+    text: "Galact.IO",
     anchor: 0.5,
     style: {
       fill: palette.text,
@@ -68,7 +68,7 @@ export class LobbyPanel extends Container {
     },
   });
   private readonly subtitle = new Text({
-    text: "Join a live staging area while the sector map lights up around you.",
+    text: "",
     anchor: 0.5,
     style: {
       fill: 0xb7cade,
@@ -98,8 +98,8 @@ export class LobbyPanel extends Container {
       align: "center",
     },
   });
-  private readonly emptyState = new Text({
-    text: "No active lobbies right now. Hold position and wait for a new signal.",
+  private readonly queueState = new Text({
+    text: "",
     anchor: 0.5,
     style: {
       fill: palette.mutedText,
@@ -109,10 +109,8 @@ export class LobbyPanel extends Container {
       align: "center",
     },
   });
+  private readonly playButton: HudButton;
   private readonly reconnectButton: HudButton;
-  private readonly entryBackdrops = new Map<string, Graphics>();
-  private readonly entryLabels = new Map<string, Text>();
-  private readonly entryButtons = new Map<string, HudButton>();
   private currentModel: LobbyPanelModel | null = null;
   private viewportWidth = 0;
   private viewportHeight = 0;
@@ -126,14 +124,19 @@ export class LobbyPanel extends Container {
   private listY = 0;
   private listWidth = 0;
   private listHeight = 0;
-  private rowHeight = 0;
-  private rowButtonWidth = 0;
   private compact = false;
   private animationTime = 0;
 
-  constructor(private readonly callbacks: LobbyPanelCallbacks) {
+  constructor(callbacks: LobbyPanelCallbacks) {
     super();
 
+    this.playButton = new HudButton({
+      label: "Play",
+      width: 172,
+      height: 52,
+      tint: 0x144466,
+      onPress: callbacks.onPlay,
+    });
     this.reconnectButton = new HudButton({
       label: "Reconnect",
       width: 130,
@@ -155,7 +158,8 @@ export class LobbyPanel extends Container {
       this.subtitle,
       this.status,
       this.error,
-      this.emptyState,
+      this.queueState,
+      this.playButton,
       this.reconnectButton,
     );
   }
@@ -183,13 +187,11 @@ export class LobbyPanel extends Container {
     this.panelX = Math.max(8, (width - this.panelWidth) * 0.5);
     this.panelY = Math.max(8, (height - this.panelHeight) * 0.5);
 
-    this.rowButtonWidth = 108;
-
     this.title.style.fontSize = this.compact ? 34 : 42;
     this.subtitle.style.fontSize = this.compact ? 15 : 17;
     this.status.style.fontSize = this.compact ? 15 : 17;
     this.error.style.fontSize = this.compact ? 14 : 15;
-    this.emptyState.style.fontSize = this.compact ? 16 : 18;
+    this.queueState.style.fontSize = this.compact ? 16 : 18;
 
     const listInset = Math.min(
       this.compact ? 20 : 28,
@@ -222,7 +224,7 @@ export class LobbyPanel extends Container {
 
     this.title.position.set(
       this.panelX + this.panelWidth * 0.5,
-      this.panelY + (this.compact ? 68 : 80),
+      this.panelY + (this.compact ? 90 : 100),
     );
     this.titleKicker.position.set(
       this.panelX + this.panelWidth * 0.5,
@@ -234,15 +236,19 @@ export class LobbyPanel extends Container {
     );
     this.status.position.set(
       this.panelX + this.panelWidth * 0.5,
-      this.panelY + (this.compact ? 142 : 160),
+      this.panelY + (this.compact ? 138 : 156),
     );
     this.error.position.set(
       this.panelX + this.panelWidth * 0.5,
-      this.panelY + (this.compact ? 170 : 190),
+      this.panelY + (this.compact ? 166 : 186),
     );
-    this.emptyState.position.set(
+    this.queueState.position.set(
       this.listX + this.listWidth * 0.5,
-      this.listY + this.listHeight * 0.5,
+      this.listY + this.listHeight * 0.4,
+    );
+    this.playButton.position.set(
+      this.listX + this.listWidth * 0.5,
+      this.listY + this.listHeight * 0.58,
     );
     this.reconnectButton.position.set(
       this.panelX + this.panelWidth * 0.5,
@@ -261,8 +267,8 @@ export class LobbyPanel extends Container {
       180,
       this.panelWidth - LobbyPanel.errorWidthPadding,
     );
-    this.emptyState.style.wordWrap = true;
-    this.emptyState.style.wordWrapWidth = Math.max(140, this.listWidth - 40);
+    this.queueState.style.wordWrap = true;
+    this.queueState.style.wordWrapWidth = Math.max(180, this.listWidth - 72);
 
     if (this.currentModel !== null) {
       this.render(this.currentModel);
@@ -286,120 +292,15 @@ export class LobbyPanel extends Container {
     this.currentModel = model;
     this.status.text = this.buildStatus(model);
     this.status.style.fill = this.statusColor(model.connectionStatus);
+    this.status.visible = this.status.text.length > 0;
     this.error.text = model.errorMessage ?? "";
     this.error.visible = model.errorMessage !== null;
-    this.emptyState.visible = model.lobbies.length === 0;
-    this.reconnectButton.setDisabled(model.connectionStatus === "connecting");
-    this.syncEntries(model);
-  }
-
-  private syncEntries(model: LobbyPanelModel): void {
-    const activeIDs = new Set<string>();
-    const lobbyCount = Math.max(1, model.lobbies.length);
-    const rowGap = this.compact ? 12 : 14;
-    const totalGap = rowGap * Math.max(0, model.lobbies.length - 1);
-    const availableHeight = Math.max(88, this.listHeight - 28 - totalGap);
-    this.rowHeight = Math.max(
-      this.compact ? 62 : 72,
-      Math.min(this.compact ? 74 : 84, availableHeight / lobbyCount),
+    this.queueState.text = this.buildQueueState(model);
+    this.queueState.visible = this.queueState.text.length > 0;
+    this.playButton.setDisabled(
+      model.connectionStatus !== "open" || model.lobbyStatus === "countdown",
     );
-    const startY = this.listY + 18;
-    const labelX = this.listX + 22;
-    const buttonX =
-      this.listX + this.listWidth - 24 - this.rowButtonWidth * 0.5;
-    const labelWidth = Math.max(1, this.listWidth - this.rowButtonWidth - 88);
-
-    model.lobbies.forEach((lobby, index) => {
-      activeIDs.add(lobby.id);
-      let row = this.entryBackdrops.get(lobby.id);
-      if (row === undefined) {
-        row = new Graphics();
-        this.entryBackdrops.set(lobby.id, row);
-        this.addChildAt(row, this.getChildIndex(this.emptyState));
-      }
-
-      let label = this.entryLabels.get(lobby.id);
-      if (label === undefined) {
-        label = new Text({
-          anchor: { x: 0, y: 0.5 },
-          style: {
-            fill: palette.text,
-            fontFamily: "Trebuchet MS",
-            fontSize: 17,
-            fontWeight: "600",
-            wordWrap: true,
-          },
-        });
-        this.entryLabels.set(lobby.id, label);
-        this.addChild(label);
-      }
-
-      let button = this.entryButtons.get(lobby.id);
-      if (button === undefined) {
-        button = new HudButton({
-          label: "Join",
-          width: this.rowButtonWidth,
-          height: 40,
-          onPress: () => this.callbacks.onJoinLobby(lobby.id),
-        });
-        this.entryButtons.set(lobby.id, button);
-        this.addChild(button);
-      }
-
-      const rowY = startY + index * (this.rowHeight + rowGap);
-      const accent = this.lobbyAccent(
-        lobby.status,
-        model.joinedLobbyId === lobby.id,
-      );
-      const rowWidth = Math.max(1, this.listWidth - 20);
-      const accentHeight = Math.max(1, this.rowHeight - 20);
-
-      row.clear();
-      row.roundRect(this.listX + 10, rowY, rowWidth, this.rowHeight, 20);
-      row.fill({ color: 0x081827, alpha: 0.84 });
-      row.roundRect(this.listX + 10, rowY, rowWidth, this.rowHeight, 20);
-      row.stroke({ color: accent, width: 1.5, alpha: 0.9 });
-      row.roundRect(this.listX + 16, rowY + 10, 6, accentHeight, 4);
-      row.fill({ color: accent, alpha: 0.92 });
-
-      label.text = this.describeLobby(lobby, model.joinedLobbyId === lobby.id);
-      label.style.fontSize = this.compact ? 15 : 17;
-      label.style.wordWrapWidth = labelWidth;
-      label.position.set(labelX + 10, rowY + this.rowHeight * 0.5);
-      button.position.set(buttonX, rowY + this.rowHeight * 0.5);
-      button.setDisabled(
-        lobby.status === "playing" || model.joinedLobbyId === lobby.id,
-      );
-    });
-
-    this.emptyState.visible = model.lobbies.length === 0;
-
-    for (const [lobbyID, row] of this.entryBackdrops) {
-      if (activeIDs.has(lobbyID)) {
-        continue;
-      }
-
-      this.entryBackdrops.delete(lobbyID);
-      row.destroy();
-    }
-
-    for (const [lobbyID, label] of this.entryLabels) {
-      if (activeIDs.has(lobbyID)) {
-        continue;
-      }
-
-      this.entryLabels.delete(lobbyID);
-      label.destroy();
-    }
-
-    for (const [lobbyID, button] of this.entryButtons) {
-      if (activeIDs.has(lobbyID)) {
-        continue;
-      }
-
-      this.entryButtons.delete(lobbyID);
-      button.destroy();
-    }
+    this.reconnectButton.setDisabled(model.connectionStatus === "connecting");
   }
 
   private drawBackdrop(): void {
@@ -509,6 +410,15 @@ export class LobbyPanel extends Container {
       24,
     );
     this.listFrame.fill({ color: palette.surface, alpha: 0.58 });
+
+    this.listFrame.roundRect(
+      this.listX + 22,
+      this.listY + 22,
+      Math.max(1, this.listWidth - 44),
+      Math.max(1, this.listHeight - 44),
+      20,
+    );
+    this.listFrame.stroke({ color: palette.outline, width: 1, alpha: 0.42 });
   }
 
   private drawBattleScene(): void {
@@ -697,24 +607,9 @@ export class LobbyPanel extends Container {
     this.battleScene.fill({ color: tint, alpha });
   }
 
-  private lobbyAccent(status: LobbyStatus, joined: boolean): number {
-    if (joined) {
-      return palette.friendly;
-    }
-
-    switch (status) {
-      case "countdown":
-        return palette.accent;
-      case "playing":
-        return palette.enemy;
-      default:
-        return palette.outline;
-    }
-  }
-
   private buildStatus(model: LobbyPanelModel): string {
     if (model.joinedLobbyId === null || model.lobbyStatus === null) {
-      return "Pick a staging room. Countdown starts as soon as two captains lock in.";
+      return "";
     }
 
     const countdownLabel =
@@ -725,13 +620,16 @@ export class LobbyPanel extends Container {
     return `Joined ${model.joinedLobbyId} · ${model.lobbyPlayers} players · ${model.lobbyStatus}${countdownLabel}`;
   }
 
-  private describeLobby(lobby: LobbySummary, joined: boolean): string {
-    const countdownLabel =
-      lobby.status === "countdown" && lobby.countdownMs !== null
-        ? ` · ${Math.max(1, Math.ceil(lobby.countdownMs / 1000))}s`
-        : "";
-    const joinedLabel = joined ? " · locked in" : "";
-    return `${lobby.id.toUpperCase()}  |  ${lobby.players}/${lobby.maxPlayers} pilots  |  ${lobby.status}${countdownLabel}${joinedLabel}`;
+  private buildQueueState(model: LobbyPanelModel): string {
+    if (model.joinedLobbyId !== null && model.lobbyStatus !== null) {
+      const countdownLabel =
+        model.lobbyStatus === "countdown" && model.countdownMs !== null
+          ? ` Match starts in ${Math.max(1, Math.ceil(model.countdownMs / 1000))}s.`
+          : "";
+      return `Queued in ${model.joinedLobbyId.toUpperCase()} with ${model.lobbyPlayers} pilot${model.lobbyPlayers === 1 ? "" : "s"}.${countdownLabel}`;
+    }
+
+    return "Press play to enter the next available match queue.";
   }
 
   private statusColor(status: ConnectionStatus): number {

@@ -29,8 +29,8 @@ export class GameScreen extends Container {
     void this.dismissResultPopup();
   });
   private readonly lobbyPanel = new LobbyPanel({
-    onJoinLobby: (lobbyID) => {
-      this.client.joinLobby(lobbyID);
+    onPlay: () => {
+      this.client.play();
     },
     onReconnect: () => this.client.reconnect(),
   });

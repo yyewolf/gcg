@@ -85,6 +85,10 @@ export interface JoinLobbyCommand {
   lobby: string;
 }
 
+export interface PlayCommand {
+  t: "play";
+}
+
 export interface SendFleetCommand {
   t: "send";
   src: number;
