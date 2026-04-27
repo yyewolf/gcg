@@ -15,7 +15,7 @@ const (
 	minPlayerCount           = 2
 	maxPlayerCount           = 12
 	homePlanetRadius         = 40.0
-	homePlanetShips          = 70
+	homePlanetShips          = 20
 	homePlanetGrowth         = 4
 	homeOrbitScaleX          = 0.38
 	homeOrbitScaleY          = 0.35
@@ -199,9 +199,9 @@ func neutralStats(radius float64) (int, int) {
 		growth = 3
 	}
 
-	ships := int(math.Round(radius * 1.2))
-	if ships < 18 {
-		ships = 18
+	ships := rand.Intn(int(math.Round(radius*0.75))) + int(math.Round(radius*0.25))
+	if ships < 7 {
+		ships = 7
 	}
 
 	return ships, growth

@@ -21,10 +21,32 @@ export class FleetView extends Container {
   private readonly trailPoints: TrailPoint[] = [];
   private fleet: FleetSnapshot | null = null;
   private color = palette.friendly;
+  private showDebugTrail: boolean;
 
-  constructor(private readonly showDebugTrail: boolean) {
+  constructor(showDebugTrail: boolean) {
     super();
+    this.showDebugTrail = showDebugTrail;
     this.addChild(this.trail, this.heading, this.body);
+  }
+
+  public setShowDebugTrail(value: boolean): void {
+    if (this.showDebugTrail === value) {
+      return;
+    }
+
+    this.showDebugTrail = value;
+    if (!value) {
+      this.trailPoints.length = 0;
+      this.trail.clear();
+      this.heading.clear();
+      return;
+    }
+
+    if (this.fleet !== null) {
+      this.pushTrailPoint(this.fleet.x, this.fleet.y);
+      this.drawTrail(this.fleet, this.color);
+      this.drawHeading(this.fleet, this.color);
+    }
   }
 
   public sync(fleet: FleetSnapshot, isFriendly: boolean): void {

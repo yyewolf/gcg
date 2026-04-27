@@ -1,5 +1,5 @@
 export const worldLayout = {
-  hudHeight: 136,
+  hudHeight: 72,
   padding: 20,
   worldWidth: 1400,
   worldHeight: 840,

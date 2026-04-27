@@ -21,7 +21,6 @@ interface BattlePlanet {
 
 interface LobbyPanelCallbacks {
   onPlay: () => void;
-  onReconnect: () => void;
 }
 
 export interface LobbyPanelModel {
@@ -110,7 +109,6 @@ export class LobbyPanel extends Container {
     },
   });
   private readonly playButton: HudButton;
-  private readonly reconnectButton: HudButton;
   private currentModel: LobbyPanelModel | null = null;
   private viewportWidth = 0;
   private viewportHeight = 0;
@@ -137,13 +135,6 @@ export class LobbyPanel extends Container {
       tint: 0x144466,
       onPress: callbacks.onPlay,
     });
-    this.reconnectButton = new HudButton({
-      label: "Reconnect",
-      width: 130,
-      height: 42,
-      tint: 0x163248,
-      onPress: callbacks.onReconnect,
-    });
 
     this.addChild(
       this.backdrop,
@@ -160,7 +151,6 @@ export class LobbyPanel extends Container {
       this.error,
       this.queueState,
       this.playButton,
-      this.reconnectButton,
     );
   }
 
@@ -198,7 +188,7 @@ export class LobbyPanel extends Container {
       Math.max(8, this.panelWidth * 0.08),
     );
     const preferredHeaderHeight = this.compact ? 188 : 214;
-    const preferredFooterHeight = this.compact ? 70 : 78;
+    const preferredFooterHeight = this.compact ? 24 : 30;
     const reservedHeight = Math.min(
       preferredHeaderHeight + preferredFooterHeight,
       Math.max(1, this.panelHeight - 8),
@@ -248,11 +238,7 @@ export class LobbyPanel extends Container {
     );
     this.playButton.position.set(
       this.listX + this.listWidth * 0.5,
-      this.listY + this.listHeight * 0.58,
-    );
-    this.reconnectButton.position.set(
-      this.panelX + this.panelWidth * 0.5,
-      this.panelY + this.panelHeight - (this.compact ? 36 : 40),
+      this.listY + this.listHeight * 0.62,
     );
 
     this.subtitle.style.wordWrap = true;
@@ -300,7 +286,6 @@ export class LobbyPanel extends Container {
     this.playButton.setDisabled(
       model.connectionStatus !== "open" || model.lobbyStatus === "countdown",
     );
-    this.reconnectButton.setDisabled(model.connectionStatus === "connecting");
   }
 
   private drawBackdrop(): void {

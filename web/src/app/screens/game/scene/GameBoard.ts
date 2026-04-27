@@ -26,12 +26,13 @@ interface Star {
 }
 
 interface GameBoardCallbacks {
+  onAdjustSendPercentage: (delta: number) => void;
   onClearSelection: () => void;
   onPlanetActivate: (planetID: number, additive: boolean) => void;
   onPlanetBoxSelect: (planetIDs: number[], additive: boolean) => void;
 }
 
-const showDebugFleetTrails = false;
+const initialShowDebugFleetTrails = false;
 const minCameraZoom = 1;
 const maxCameraZoom = 3.5;
 const zoomStep = 1.15;
@@ -69,6 +70,7 @@ export class GameBoard extends Container {
   private cameraZoom = 1;
   private cameraPanX = 0;
   private cameraPanY = 0;
+  private showDebugFleetTrails = initialShowDebugFleetTrails;
   private fleetPredictionMS = 0;
   private fleetPredictionLimitMS = 100;
   private activePointerButton: number | null = null;
@@ -159,6 +161,17 @@ export class GameBoard extends Container {
 
     for (const fleetView of this.fleetViews.values()) {
       fleetView.predict(this.fleetPredictionMS);
+    }
+  }
+
+  public setShowDebugFleetTrails(value: boolean): void {
+    if (this.showDebugFleetTrails === value) {
+      return;
+    }
+
+    this.showDebugFleetTrails = value;
+    for (const fleetView of this.fleetViews.values()) {
+      fleetView.setShowDebugTrail(value);
     }
   }
 
@@ -410,6 +423,12 @@ export class GameBoard extends Container {
       return;
     }
 
+    if (event.shiftKey) {
+      this.callbacks.onAdjustSendPercentage(event.deltaY < 0 ? 10 : -10);
+      event.stopPropagation();
+      return;
+    }
+
     const previousScale = this.fitScale * this.cameraZoom;
     const nextZoom = clamp(
       this.cameraZoom * (event.deltaY < 0 ? zoomStep : 1 / zoomStep),
@@ -565,11 +584,12 @@ export class GameBoard extends Container {
       activeIDs.add(fleet.id);
       let view = this.fleetViews.get(fleet.id);
       if (view === undefined) {
-        view = new FleetView(showDebugFleetTrails);
+        view = new FleetView(this.showDebugFleetTrails);
         this.fleetViews.set(fleet.id, view);
         this.fleetLayer.addChild(view);
       }
 
+      view.setShowDebugTrail(this.showDebugFleetTrails);
       view.sync(fleet, fleet.owner === playerID);
     }
 

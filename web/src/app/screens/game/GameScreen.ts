@@ -19,6 +19,7 @@ import type {
 
 import { GameBoard } from "./scene/GameBoard";
 import { GameHud } from "./ui/GameHud";
+import { DebugMenu } from "./ui/DebugMenu";
 import { LobbyPanel } from "./ui/LobbyPanel";
 import { GameResultPopup, type GameResult } from "../../popups/GameResultPopup";
 
@@ -32,9 +33,9 @@ export class GameScreen extends Container {
     onPlay: () => {
       this.client.play();
     },
-    onReconnect: () => this.client.reconnect(),
   });
   private readonly board = new GameBoard({
+    onAdjustSendPercentage: (delta) => this.adjustPercentage(delta),
     onClearSelection: () => this.clearSelection(),
     onPlanetActivate: (planetID, additive) =>
       this.handlePlanetActivate(planetID, additive),
@@ -42,10 +43,13 @@ export class GameScreen extends Container {
       this.handlePlanetBoxSelect(planetIDs, additive),
   });
   private readonly client = new GameClient();
-  private readonly hud = new GameHud({
-    onDecreasePercentage: () => this.adjustPercentage(-PERCENTAGE_STEP),
-    onIncreasePercentage: () => this.adjustPercentage(PERCENTAGE_STEP),
-    onReconnect: () => this.client.reconnect(),
+  private readonly hud = new GameHud();
+  private readonly debugMenu = new DebugMenu({
+    onTogglePathPredictions: (enabled) => {
+      this.board.setShowDebugFleetTrails(enabled);
+      this.showDebugPathPredictions = enabled;
+      this.render();
+    },
   });
   private unsubscribe: (() => void) | null = null;
   private paused = false;
@@ -61,6 +65,7 @@ export class GameScreen extends Container {
   private result: GameResult | null = null;
   private readonly selectedSourceIDs = new Set<number>();
   private sendPercentage = 50;
+  private showDebugPathPredictions = false;
   private snapshot: Snapshot | null = null;
   private readonly onContextMenu = (event: MouseEvent) => {
     event.preventDefault();
@@ -71,7 +76,13 @@ export class GameScreen extends Container {
 
   constructor() {
     super();
-    this.addChild(this.board, this.hud, this.lobbyPanel, this.resultPopup);
+    this.addChild(
+      this.board,
+      this.hud,
+      this.lobbyPanel,
+      this.debugMenu,
+      this.resultPopup,
+    );
   }
 
   public prepare(): void {
@@ -113,6 +124,7 @@ export class GameScreen extends Container {
     this.board.resize(width, height);
     this.hud.resize(width, height);
     this.lobbyPanel.resize(width, height);
+    this.debugMenu.resize();
     this.resultPopup.resize(width, height);
   }
 
@@ -387,49 +399,33 @@ export class GameScreen extends Container {
 
     if (inGame) {
       this.hud.render({
+        sendPercentage: this.sendPercentage,
+      });
+    } else {
+      this.lobbyPanel.render({
         connectionStatus: this.connectionStatus,
         errorMessage: this.errorMessage,
-        fleetCount: this.snapshot?.fleets.length ?? 0,
-        mapName: this.mapName,
-        planetCount: this.snapshot?.planets.length ?? 0,
-        playerId: this.playerID,
-        selectedSourceText: this.describeSelection(),
-        sendPercentage: this.sendPercentage,
-        tick: this.snapshot?.tick ?? null,
+        joinedLobbyId: this.joinedLobbyId,
+        lobbyStatus: this.lobbyStatus,
+        lobbyPlayers: this.lobbyPlayers,
+        countdownMs: this.lobbyCountdownMS,
+        lobbies: this.lobbies,
       });
-      return;
     }
 
-    this.lobbyPanel.render({
+    this.debugMenu.render({
       connectionStatus: this.connectionStatus,
-      errorMessage: this.errorMessage,
+      fleetCount: this.snapshot?.fleets.length ?? 0,
+      inGame,
       joinedLobbyId: this.joinedLobbyId,
-      lobbyStatus: this.lobbyStatus,
       lobbyPlayers: this.lobbyPlayers,
-      countdownMs: this.lobbyCountdownMS,
-      lobbies: this.lobbies,
+      lobbyStatus: this.lobbyStatus,
+      mapName: this.mapName,
+      planetCount: this.snapshot?.planets.length ?? 0,
+      playerId: this.playerID,
+      showPathPredictions: this.showDebugPathPredictions,
+      tick: this.snapshot?.tick ?? null,
     });
-  }
-
-  private describeSelection(): string {
-    const selectedPlanets = Array.from(this.selectedSourceIDs)
-      .map((planetID) => this.findPlanet(planetID))
-      .filter((planet): planet is PlanetSnapshot => planet !== null);
-
-    if (selectedPlanets.length === 0) {
-      return "No launch origin selected. Click to select, Ctrl-click to add, or drag a selection box.";
-    }
-
-    if (selectedPlanets.length === 1) {
-      const [selectedSource] = selectedPlanets;
-      return `Source planet ${selectedSource.id} armed with ${selectedSource.ships} ships. Select a target to launch ${this.sendPercentage}%.`;
-    }
-
-    const totalShips = selectedPlanets.reduce(
-      (sum, planet) => sum + planet.ships,
-      0,
-    );
-    return `${selectedPlanets.length} planets selected with ${totalShips} ships total. Select a target to launch ${this.sendPercentage}% from each.`;
   }
 
   private findPlanet(planetID: number): PlanetSnapshot | null {

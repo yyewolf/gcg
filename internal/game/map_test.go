@@ -34,6 +34,15 @@ func TestRandomMapLayoutProducesLargeDenseTenPlayerMap(t *testing.T) {
 	}
 
 	for _, planet := range layout.Planets {
+		if planet.Owner == 0 {
+			continue
+		}
+		if planet.Ships != homePlanetShips {
+			t.Fatalf("expected home planet %d to start with %d ships, got %d", planet.ID, homePlanetShips, planet.Ships)
+		}
+	}
+
+	for _, planet := range layout.Planets {
 		if planet.X-planet.Radius < mapEdgePadding || planet.X+planet.Radius > layout.Width-mapEdgePadding {
 			t.Fatalf("planet %d exceeds horizontal bounds", planet.ID)
 		}
@@ -59,6 +68,15 @@ func TestRandomMapLayoutHonorsConfiguredPlayerCount(t *testing.T) {
 	for owner := 1; owner <= 6; owner++ {
 		if !owners[owner] {
 			t.Fatalf("missing home planet for player %d", owner)
+		}
+	}
+
+	for _, planet := range layout.Planets {
+		if planet.Owner == 0 {
+			continue
+		}
+		if planet.Ships != homePlanetShips {
+			t.Fatalf("expected player %d home planet to start with %d ships, got %d", planet.Owner, homePlanetShips, planet.Ships)
 		}
 	}
 }
