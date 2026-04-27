@@ -13,6 +13,7 @@ import type {
 } from "../../../game/protocol";
 
 import { worldLayout, palette, type OwnershipTone } from "../theme";
+import { ownershipColor } from "../theme";
 
 import { FleetView } from "./FleetView";
 
@@ -38,6 +39,7 @@ const maxCameraZoom = 3.5;
 const zoomStep = 1.15;
 const panDragThreshold = 8;
 const predictionLeadTicks = 1.35;
+const spawnCameraZoom = 2.1;
 
 function buildStarField(width: number, height: number): Star[] {
   const count = Math.max(48, Math.round((width * height) / 28000));
@@ -55,6 +57,7 @@ export class GameBoard extends Container {
   private readonly world = new Container();
   private readonly worldBackdrop = new Graphics();
   private readonly fleetLayer = new Container();
+  private readonly previewLayer = new Graphics();
   private readonly planetLayer = new Container();
   private readonly selectionOverlay = new Graphics();
   private readonly fleetViews = new Map<number, FleetView>();
@@ -70,6 +73,10 @@ export class GameBoard extends Container {
   private cameraZoom = 1;
   private cameraPanX = 0;
   private cameraPanY = 0;
+  private currentPlayerID: number | null = null;
+  private hoveredPlanetID: number | null = null;
+  private readonly selectedSourceIDs = new Set<number>();
+  private shouldAutoFocusPlayer = true;
   private showDebugFleetTrails = initialShowDebugFleetTrails;
   private fleetPredictionMS = 0;
   private fleetPredictionLimitMS = 100;
@@ -88,7 +95,12 @@ export class GameBoard extends Container {
     super();
 
     this.eventMode = "static";
-    this.world.addChild(this.worldBackdrop, this.fleetLayer, this.planetLayer);
+    this.world.addChild(
+      this.worldBackdrop,
+      this.fleetLayer,
+      this.previewLayer,
+      this.planetLayer,
+    );
     this.addChild(this.screenBackdrop, this.world, this.selectionOverlay);
     this.on("pointerdown", this.handlePointerDown, this);
     this.on("globalpointermove", this.handlePointerMove, this);
@@ -122,14 +134,20 @@ export class GameBoard extends Container {
     playerID: number | null,
     selectedSourceIDs: ReadonlySet<number>,
   ): void {
+    this.currentPlayerID = playerID;
+    this.replaceSelectedSourceIDs(selectedSourceIDs);
+
     if (snapshot === null) {
       this.currentPlanets.clear();
+      this.hoveredPlanetID = null;
+      this.shouldAutoFocusPlayer = true;
       this.syncPlanets([], playerID, selectedSourceIDs);
       this.syncFleets([], playerID);
       this.previousFleets.clear();
       this.previousPlanets.clear();
       this.fleetPredictionMS = 0;
       this.clearSelectionBox();
+      this.drawPreviewPaths();
       return;
     }
 
@@ -141,8 +159,16 @@ export class GameBoard extends Container {
     );
 
     this.syncPlanets(snapshot.planets, playerID, selectedSourceIDs);
+    this.syncAutoFocus(snapshot.planets, playerID);
     this.syncLandingImpacts(snapshot.fleets, playerID);
     this.syncFleets(snapshot.fleets, playerID);
+    if (
+      this.hoveredPlanetID !== null &&
+      !this.currentPlanets.has(this.hoveredPlanetID)
+    ) {
+      this.hoveredPlanetID = null;
+    }
+    this.drawPreviewPaths();
     this.previousPlanets.clear();
     for (const planet of snapshot.planets) {
       this.previousPlanets.set(planet.id, planet);
@@ -227,11 +253,11 @@ export class GameBoard extends Container {
   }
 
   private handlePointerDown(event: FederatedPointerEvent): void {
-    if (event.global.y < worldLayout.hudHeight) {
+    if (event.button !== 0 && event.button !== 2) {
       return;
     }
 
-    if (event.button !== 0 && event.button !== 2) {
+    if (event.button === 2 && event.global.y < worldLayout.hudHeight) {
       return;
     }
 
@@ -254,6 +280,14 @@ export class GameBoard extends Container {
 
   private handlePointerMove(event: FederatedPointerEvent): void {
     if (this.activePointerButton === null) {
+      if (event.global.y < worldLayout.hudHeight) {
+        this.setHoveredPlanet(null);
+        return;
+      }
+
+      this.setHoveredPlanet(
+        this.resolvePlanetAtScreen(event.global.x, event.global.y),
+      );
       return;
     }
 
@@ -325,13 +359,20 @@ export class GameBoard extends Container {
       return;
     }
 
+    if (this.dragStartY < worldLayout.hudHeight) {
+      this.setHoveredPlanet(null);
+      return;
+    }
+
     const planetID = this.resolvePlanetAtScreen(event.global.x, event.global.y);
     if (planetID !== null) {
+      this.setHoveredPlanet(planetID);
       this.callbacks.onPlanetActivate(planetID, additive);
       event.stopPropagation();
       return;
     }
 
+    this.setHoveredPlanet(null);
     if (!additive) {
       this.callbacks.onClearSelection();
       event.stopPropagation();
@@ -340,9 +381,16 @@ export class GameBoard extends Container {
 
   private drawSelectionBox(): void {
     const left = Math.min(this.dragStartX, this.dragCurrentX);
-    const top = Math.min(this.dragStartY, this.dragCurrentY);
+    const top = Math.max(
+      worldLayout.hudHeight,
+      Math.min(this.dragStartY, this.dragCurrentY),
+    );
     const width = Math.abs(this.dragCurrentX - this.dragStartX);
-    const height = Math.abs(this.dragCurrentY - this.dragStartY);
+    const bottom = Math.max(
+      worldLayout.hudHeight,
+      Math.max(this.dragStartY, this.dragCurrentY),
+    );
+    const height = bottom - top;
 
     this.selectionOverlay.clear();
     this.selectionOverlay.roundRect(left, top, width, height, 10);
@@ -362,7 +410,10 @@ export class GameBoard extends Container {
   private resolvePlanetsInSelectionBox(): number[] {
     const left = Math.min(this.dragStartX, this.dragCurrentX);
     const right = Math.max(this.dragStartX, this.dragCurrentX);
-    const top = Math.min(this.dragStartY, this.dragCurrentY);
+    const top = Math.max(
+      worldLayout.hudHeight,
+      Math.min(this.dragStartY, this.dragCurrentY),
+    );
     const bottom = Math.max(this.dragStartY, this.dragCurrentY);
     const scale = this.world.scale.x;
     const selectedIDs: number[] = [];
@@ -480,6 +531,7 @@ export class GameBoard extends Container {
       centered.y + this.cameraPanY,
     );
     this.world.scale.set(scale);
+    this.drawPreviewPaths();
   }
 
   private centeredWorldRect(scale: number): {
@@ -574,6 +626,146 @@ export class GameBoard extends Container {
 
       this.planetViews.delete(planetID);
       view.destroy();
+    }
+  }
+
+  private replaceSelectedSourceIDs(
+    selectedSourceIDs: ReadonlySet<number>,
+  ): void {
+    this.selectedSourceIDs.clear();
+    for (const planetID of selectedSourceIDs) {
+      this.selectedSourceIDs.add(planetID);
+    }
+  }
+
+  private syncAutoFocus(
+    planets: PlanetSnapshot[],
+    playerID: number | null,
+  ): void {
+    if (
+      !this.shouldAutoFocusPlayer ||
+      playerID === null ||
+      planets.length === 0
+    ) {
+      return;
+    }
+
+    const spawnPlanet = this.resolveSpawnPlanet(planets, playerID);
+    if (spawnPlanet === null) {
+      return;
+    }
+
+    this.cameraZoom = spawnCameraZoom;
+    this.focusPlanet(spawnPlanet);
+    this.shouldAutoFocusPlayer = false;
+  }
+
+  private resolveSpawnPlanet(
+    planets: PlanetSnapshot[],
+    playerID: number,
+  ): PlanetSnapshot | null {
+    let bestPlanet: PlanetSnapshot | null = null;
+
+    for (const planet of planets) {
+      if (planet.owner !== playerID) {
+        continue;
+      }
+
+      if (
+        bestPlanet === null ||
+        planet.ships > bestPlanet.ships ||
+        (planet.ships === bestPlanet.ships && planet.r > bestPlanet.r) ||
+        (planet.ships === bestPlanet.ships &&
+          planet.r === bestPlanet.r &&
+          planet.id < bestPlanet.id)
+      ) {
+        bestPlanet = planet;
+      }
+    }
+
+    return bestPlanet;
+  }
+
+  private focusPlanet(planet: PlanetSnapshot): void {
+    if (this.viewportWidth < 1 || this.viewportHeight < 1) {
+      return;
+    }
+
+    const scale = this.fitScale * this.cameraZoom;
+    if (scale <= 0) {
+      return;
+    }
+
+    const centered = this.centeredWorldRect(scale);
+    const targetX = this.viewportWidth * 0.5;
+    const targetY =
+      worldLayout.hudHeight +
+      (this.viewportHeight - worldLayout.hudHeight) * 0.5;
+    this.cameraPanX = targetX - centered.x - planet.x * scale;
+    this.cameraPanY = targetY - centered.y - planet.y * scale;
+    this.applyWorldTransform();
+  }
+
+  private setHoveredPlanet(planetID: number | null): void {
+    if (this.hoveredPlanetID === planetID) {
+      return;
+    }
+
+    this.hoveredPlanetID = planetID;
+    this.drawPreviewPaths();
+  }
+
+  private drawPreviewPaths(): void {
+    this.previewLayer.clear();
+    if (this.hoveredPlanetID === null || this.selectedSourceIDs.size === 0) {
+      return;
+    }
+
+    const destination = this.currentPlanets.get(this.hoveredPlanetID);
+    if (destination === undefined) {
+      return;
+    }
+
+    let drewAny = false;
+    for (const sourceID of this.selectedSourceIDs) {
+      if (sourceID === this.hoveredPlanetID) {
+        continue;
+      }
+
+      const source = this.currentPlanets.get(sourceID);
+      if (source === undefined) {
+        continue;
+      }
+
+      const dx = destination.x - source.x;
+      const dy = destination.y - source.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance <= 0.001) {
+        continue;
+      }
+
+      const directionX = dx / distance;
+      const directionY = dy / distance;
+      const startX = source.x + directionX * (source.r + 8);
+      const startY = source.y + directionY * (source.r + 8);
+      const endX = destination.x - directionX * (destination.r + 8);
+      const endY = destination.y - directionY * (destination.r + 8);
+      const tone = this.resolveTone(source.owner, this.currentPlayerID);
+      const color = ownershipColor(tone);
+
+      this.previewLayer.moveTo(startX, startY);
+      this.previewLayer.lineTo(endX, endY);
+      this.previewLayer.stroke({ color, width: 3, alpha: 0.84 });
+
+      this.previewLayer.circle(startX, startY, 4.5);
+      this.previewLayer.fill({ color, alpha: 0.55 });
+      this.previewLayer.circle(endX, endY, 5.5);
+      this.previewLayer.stroke({ color, width: 2, alpha: 0.92 });
+      drewAny = true;
+    }
+
+    if (!drewAny) {
+      this.previewLayer.clear();
     }
   }
 
