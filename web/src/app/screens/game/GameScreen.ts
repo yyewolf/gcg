@@ -117,6 +117,10 @@ export class GameScreen extends Container {
   }
 
   public update(time: Ticker): void {
+    if (this.lobbyPanel.visible) {
+      this.lobbyPanel.update(time.deltaMS);
+    }
+
     if (!this.paused && this.snapshot !== null) {
       this.board.update(time.deltaMS);
     }

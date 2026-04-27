@@ -85,9 +85,7 @@ export class CreationResizePlugin {
       }
 
       this._cancelResize!();
-
-      // Throttle resize events per raf
-      this._resizeId = requestAnimationFrame(() => app.resize!());
+      app.resize!();
     };
 
     /**
