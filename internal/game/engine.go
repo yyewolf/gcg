@@ -13,6 +13,21 @@ const launchPositionTolerance = 0.001
 const planetGrowthIntervalSeconds = 2
 const growthTimeEpsilon = 1e-9
 
+var playerColorPalette = []int{
+	0x63f0ff,
+	0xff728c,
+	0x8bff6a,
+	0xffd166,
+	0xc792ff,
+	0xff9f5c,
+	0x5eead4,
+	0xf472b6,
+	0x60a5fa,
+	0xfacc15,
+	0xfb7185,
+	0x34d399,
+}
+
 type Engine struct {
 	mu          sync.RWMutex
 	tick        int64
@@ -26,6 +41,7 @@ type Engine struct {
 	fleets      map[int]*Fleet
 	nextFleetID int
 	mapName     string
+	playerColors []PlayerColor
 }
 
 func NewEngine() *Engine {
@@ -33,6 +49,7 @@ func NewEngine() *Engine {
 }
 
 func NewEngineWithConfig(config MapConfig) *Engine {
+	config = normalizeMapConfig(config)
 	mapLayout := newRandomMapLayoutWithConfig(config)
 
 	return &Engine{
@@ -45,7 +62,20 @@ func NewEngineWithConfig(config MapConfig) *Engine {
 		fleets:      make(map[int]*Fleet),
 		nextFleetID: 1,
 		mapName:     mapLayout.Name,
+		playerColors: resolvePlayerColors(config.PlayerCount),
 	}
+}
+
+func resolvePlayerColors(playerCount int) []PlayerColor {
+	colors := make([]PlayerColor, 0, playerCount)
+	for playerIndex := 0; playerIndex < playerCount; playerIndex++ {
+		colors = append(colors, PlayerColor{
+			PlayerID: playerIndex + 1,
+			Color:    playerColorPalette[playerIndex%len(playerColorPalette)],
+		})
+	}
+
+	return colors
 }
 
 func (engine *Engine) TickRate() int {
@@ -358,11 +388,12 @@ func (engine *Engine) snapshotForPlayerLocked(playerID int) Snapshot {
 	}
 
 	return Snapshot{
-		Tick:     engine.tick,
-		TickRate: engine.tickRate,
-		Width:    engine.worldWidth,
-		Height:   engine.worldHeight,
-		Planets:  planets,
-		Fleets:   fleets,
+		Tick:         engine.tick,
+		TickRate:     engine.tickRate,
+		Width:        engine.worldWidth,
+		Height:       engine.worldHeight,
+		Planets:      planets,
+		Fleets:       fleets,
+		PlayerColors: append([]PlayerColor(nil), engine.playerColors...),
 	}
 }

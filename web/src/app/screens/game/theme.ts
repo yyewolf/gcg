@@ -20,15 +20,26 @@ export const palette = {
   warning: 0xffa94d,
 };
 
-export type OwnershipTone = "self" | "enemy" | "neutral";
+const playerColorPalette = [
+  0x63f0ff, 0xff728c, 0x8bff6a, 0xffd166, 0xc792ff, 0xff9f5c, 0x5eead4,
+  0xf472b6, 0x60a5fa, 0xfacc15, 0xfb7185, 0x34d399,
+];
 
-export function ownershipColor(tone: OwnershipTone): number {
-  switch (tone) {
-    case "self":
-      return palette.friendly;
-    case "enemy":
-      return palette.enemy;
-    default:
-      return palette.neutral;
+export function defaultPlayerColor(playerID: number): number {
+  if (playerID <= 0) {
+    return palette.neutral;
   }
+
+  return playerColorPalette[(playerID - 1) % playerColorPalette.length];
+}
+
+export function resolveOwnershipColor(
+  owner: number,
+  playerColors: ReadonlyMap<number, number>,
+): number {
+  if (owner === 0) {
+    return palette.neutral;
+  }
+
+  return playerColors.get(owner) ?? defaultPlayerColor(owner);
 }

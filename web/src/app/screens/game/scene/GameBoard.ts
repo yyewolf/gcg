@@ -9,11 +9,11 @@ import {
 import type {
   FleetSnapshot,
   PlanetSnapshot,
+  PlayerColor,
   Snapshot,
 } from "../../../game/protocol";
 
-import { worldLayout, palette, type OwnershipTone } from "../theme";
-import { ownershipColor } from "../theme";
+import { worldLayout, palette, resolveOwnershipColor } from "../theme";
 
 import { FleetView } from "./FleetView";
 
@@ -63,6 +63,7 @@ export class GameBoard extends Container {
   private readonly fleetViews = new Map<number, FleetView>();
   private readonly planetViews = new Map<number, PlanetView>();
   private readonly currentPlanets = new Map<number, PlanetSnapshot>();
+  private readonly currentPlayerColors = new Map<number, number>();
   private readonly previousFleets = new Map<number, FleetSnapshot>();
   private readonly previousPlanets = new Map<number, PlanetSnapshot>();
   private mapWidth = worldLayout.worldWidth;
@@ -73,7 +74,6 @@ export class GameBoard extends Container {
   private cameraZoom = 1;
   private cameraPanX = 0;
   private cameraPanY = 0;
-  private currentPlayerID: number | null = null;
   private hoveredPlanetID: number | null = null;
   private readonly selectedSourceIDs = new Set<number>();
   private shouldAutoFocusPlayer = true;
@@ -134,15 +134,15 @@ export class GameBoard extends Container {
     playerID: number | null,
     selectedSourceIDs: ReadonlySet<number>,
   ): void {
-    this.currentPlayerID = playerID;
     this.replaceSelectedSourceIDs(selectedSourceIDs);
 
     if (snapshot === null) {
+      this.currentPlayerColors.clear();
       this.currentPlanets.clear();
       this.hoveredPlanetID = null;
       this.shouldAutoFocusPlayer = true;
       this.syncPlanets([], playerID, selectedSourceIDs);
-      this.syncFleets([], playerID);
+      this.syncFleets([]);
       this.previousFleets.clear();
       this.previousPlanets.clear();
       this.fleetPredictionMS = 0;
@@ -152,6 +152,7 @@ export class GameBoard extends Container {
     }
 
     this.syncWorldBounds(snapshot.width, snapshot.height);
+    this.syncPlayerColors(snapshot.playerColors);
     this.fleetPredictionMS = 0;
     this.fleetPredictionLimitMS = Math.max(
       50,
@@ -161,7 +162,7 @@ export class GameBoard extends Container {
     this.syncPlanets(snapshot.planets, playerID, selectedSourceIDs);
     this.syncAutoFocus(snapshot.planets, playerID);
     this.syncLandingImpacts(snapshot.fleets, playerID);
-    this.syncFleets(snapshot.fleets, playerID);
+    this.syncFleets(snapshot.fleets);
     if (
       this.hoveredPlanetID !== null &&
       !this.currentPlanets.has(this.hoveredPlanetID)
@@ -615,7 +616,9 @@ export class GameBoard extends Container {
       view.sync({
         planet,
         selected: selectedSourceIDs.has(planet.id),
-        tone: this.resolveTone(planet.owner, playerID),
+        color: this.resolveOwnerColor(planet.owner),
+        concealShips: this.shouldConcealShips(planet.owner, playerID),
+        neutral: planet.owner === 0,
       });
     }
 
@@ -635,6 +638,13 @@ export class GameBoard extends Container {
     this.selectedSourceIDs.clear();
     for (const planetID of selectedSourceIDs) {
       this.selectedSourceIDs.add(planetID);
+    }
+  }
+
+  private syncPlayerColors(playerColors: PlayerColor[]): void {
+    this.currentPlayerColors.clear();
+    for (const playerColor of playerColors) {
+      this.currentPlayerColors.set(playerColor.playerId, playerColor.color);
     }
   }
 
@@ -750,8 +760,7 @@ export class GameBoard extends Container {
       const startY = source.y + directionY * (source.r + 8);
       const endX = destination.x - directionX * (destination.r + 8);
       const endY = destination.y - directionY * (destination.r + 8);
-      const tone = this.resolveTone(source.owner, this.currentPlayerID);
-      const color = ownershipColor(tone);
+      const color = this.resolveOwnerColor(source.owner);
 
       this.previewLayer.moveTo(startX, startY);
       this.previewLayer.lineTo(endX, endY);
@@ -769,7 +778,7 @@ export class GameBoard extends Container {
     }
   }
 
-  private syncFleets(fleets: FleetSnapshot[], playerID: number | null): void {
+  private syncFleets(fleets: FleetSnapshot[]): void {
     const activeIDs = new Set<number>();
 
     for (const fleet of fleets) {
@@ -782,7 +791,7 @@ export class GameBoard extends Container {
       }
 
       view.setShowDebugTrail(this.showDebugFleetTrails);
-      view.sync(fleet, fleet.owner === playerID);
+      view.sync(fleet, this.resolveOwnerColor(fleet.owner));
     }
 
     for (const [fleetID, view] of this.fleetViews) {
@@ -826,16 +835,12 @@ export class GameBoard extends Container {
     }
   }
 
-  private resolveTone(owner: number, playerID: number | null): OwnershipTone {
-    if (owner === 0) {
-      return "neutral";
-    }
+  private shouldConcealShips(owner: number, playerID: number | null): boolean {
+    return owner !== 0 && (playerID === null || owner !== playerID);
+  }
 
-    if (playerID !== null && owner === playerID) {
-      return "self";
-    }
-
-    return "enemy";
+  private resolveOwnerColor(owner: number): number {
+    return resolveOwnershipColor(owner, this.currentPlayerColors);
   }
 }
 

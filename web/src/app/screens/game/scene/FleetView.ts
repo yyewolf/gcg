@@ -2,8 +2,6 @@ import { Container, Graphics } from "pixi.js";
 
 import type { FleetSnapshot } from "../../../game/protocol";
 
-import { palette } from "../theme";
-
 const maxTrailPoints = 24;
 const minTrailPointDistance = 4;
 const shipLength = 9;
@@ -20,7 +18,7 @@ export class FleetView extends Container {
   private readonly heading = new Graphics();
   private readonly trailPoints: TrailPoint[] = [];
   private fleet: FleetSnapshot | null = null;
-  private color = palette.friendly;
+  private color = 0xffffff;
   private showDebugTrail: boolean;
 
   constructor(showDebugTrail: boolean) {
@@ -49,9 +47,9 @@ export class FleetView extends Container {
     }
   }
 
-  public sync(fleet: FleetSnapshot, isFriendly: boolean): void {
+  public sync(fleet: FleetSnapshot, color: number): void {
     this.fleet = fleet;
-    this.color = isFriendly ? palette.friendly : palette.enemy;
+    this.color = color;
     this.position.set(fleet.x, fleet.y);
 
     if (this.showDebugTrail) {

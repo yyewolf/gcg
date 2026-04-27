@@ -2,7 +2,7 @@ import { Container, Graphics, Text } from "pixi.js";
 
 import type { PlanetSnapshot } from "../../../game/protocol";
 
-import { ownershipColor, palette, type OwnershipTone } from "../theme";
+import { palette } from "../theme";
 
 interface PlanetImpact {
   ageMS: number;
@@ -17,7 +17,9 @@ interface PlanetImpact {
 export interface PlanetPresentation {
   planet: PlanetSnapshot;
   selected: boolean;
-  tone: OwnershipTone;
+  color: number;
+  concealShips: boolean;
+  neutral: boolean;
 }
 
 export class PlanetView extends Container {
@@ -46,7 +48,8 @@ export class PlanetView extends Container {
   private selected = false;
   private pulse = 0;
   private readonly impacts: PlanetImpact[] = [];
-  private lastTone: OwnershipTone | null = null;
+  private lastColor: number | null = null;
+  private lastNeutral: boolean | null = null;
   private lastShipText = "";
 
   constructor() {
@@ -64,12 +67,14 @@ export class PlanetView extends Container {
 
   public sync(presentation: PlanetPresentation): void {
     const nextRadius = presentation.planet.r;
-    const nextShipText =
-      presentation.tone === "enemy" ? "?" : String(presentation.planet.ships);
+    const nextShipText = presentation.concealShips
+      ? "?"
+      : String(presentation.planet.ships);
 
     if (this.radius !== nextRadius) {
       this.radius = nextRadius;
-      this.lastTone = null;
+      this.lastColor = null;
+      this.lastNeutral = null;
     }
 
     if (!this.selected && presentation.selected) {
@@ -83,9 +88,13 @@ export class PlanetView extends Container {
     }
     this.shipLabel.visible = true;
     this.growthLabel.visible = false;
-    if (this.lastTone !== presentation.tone) {
-      this.draw(presentation.tone);
-      this.lastTone = presentation.tone;
+    if (
+      this.lastColor !== presentation.color ||
+      this.lastNeutral !== presentation.neutral
+    ) {
+      this.draw(presentation.color, presentation.neutral);
+      this.lastColor = presentation.color;
+      this.lastNeutral = presentation.neutral;
     }
   }
 
@@ -121,9 +130,7 @@ export class PlanetView extends Container {
     }
   }
 
-  private draw(tone: OwnershipTone): void {
-    const color = ownershipColor(tone);
-
+  private draw(color: number, neutral: boolean): void {
     this.halo.clear();
     this.halo.circle(0, 0, this.radius + 12);
     this.halo.fill({ color, alpha: 0.18 });
@@ -134,7 +141,7 @@ export class PlanetView extends Container {
     this.body.circle(0, 0, this.radius + 2);
     this.body.stroke({ color, width: 3, alpha: 0.92 });
     this.body.circle(0, 0, this.radius);
-    this.body.fill({ color, alpha: tone === "neutral" ? 0.2 : 0.3 });
+    this.body.fill({ color, alpha: neutral ? 0.2 : 0.3 });
     this.body.circle(0, 0, this.radius * 0.55);
     this.body.fill({ color, alpha: 0.86 });
   }

@@ -26,11 +26,17 @@ type Fleet struct {
 	AvoidClockwise bool    `json:"-"`
 }
 
+type PlayerColor struct {
+	PlayerID int `json:"playerId"`
+	Color    int `json:"color"`
+}
+
 type Snapshot struct {
-	Tick     int64    `json:"tick"`
-	TickRate int      `json:"tickRate"`
-	Width    float64  `json:"width"`
-	Height   float64  `json:"height"`
-	Planets  []Planet `json:"planets"`
-	Fleets   []Fleet  `json:"fleets"`
+	Tick         int64         `json:"tick"`
+	TickRate     int           `json:"tickRate"`
+	Width        float64       `json:"width"`
+	Height       float64       `json:"height"`
+	Planets      []Planet      `json:"planets"`
+	Fleets       []Fleet       `json:"fleets"`
+	PlayerColors []PlayerColor `json:"playerColors"`
 }

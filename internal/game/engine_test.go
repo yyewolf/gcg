@@ -253,3 +253,23 @@ func TestWinnerRequiresSingleRemainingOwner(t *testing.T) {
 		t.Fatalf("expected no winner while multiple owners remain, got %d", winnerID)
 	}
 }
+
+func TestSnapshotForPlayerIncludesAssignedColors(t *testing.T) {
+	engine := NewEngineWithConfig(MapConfig{PlayerCount: 3})
+
+	snapshot := engine.SnapshotForPlayer(2)
+
+	if len(snapshot.PlayerColors) != 3 {
+		t.Fatalf("expected 3 player colors, got %d", len(snapshot.PlayerColors))
+	}
+
+	for index, color := range snapshot.PlayerColors {
+		expectedPlayerID := index + 1
+		if color.PlayerID != expectedPlayerID {
+			t.Fatalf("expected player color entry %d to target player %d, got %d", index, expectedPlayerID, color.PlayerID)
+		}
+		if color.Color != playerColorPalette[index] {
+			t.Fatalf("expected player %d color %#x, got %#x", expectedPlayerID, playerColorPalette[index], color.Color)
+		}
+	}
+}

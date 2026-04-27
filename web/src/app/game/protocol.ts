@@ -20,6 +20,11 @@ export interface FleetSnapshot {
   vy: number;
 }
 
+export interface PlayerColor {
+  playerId: number;
+  color: number;
+}
+
 export interface Snapshot {
   tick: number;
   tickRate: number;
@@ -27,6 +32,7 @@ export interface Snapshot {
   height: number;
   planets: PlanetSnapshot[];
   fleets: FleetSnapshot[];
+  playerColors: PlayerColor[];
 }
 
 export type LobbyStatus = "waiting" | "countdown" | "playing";
@@ -184,12 +190,26 @@ function parseLobbySummary(value: unknown): LobbySummary | null {
   };
 }
 
+function parsePlayerColor(value: unknown): PlayerColor | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const { playerId, color } = value;
+  if (!isNumber(playerId) || !isNumber(color)) {
+    return null;
+  }
+
+  return { playerId, color };
+}
+
 function parseSnapshot(value: unknown): Snapshot | null {
   if (!isRecord(value)) {
     return null;
   }
 
-  const { tick, tickRate, width, height, planets, fleets } = value;
+  const { tick, tickRate, width, height, planets, fleets, playerColors } =
+    value;
   if (
     !isNumber(tick) ||
     !isNumber(tickRate) ||
@@ -200,6 +220,9 @@ function parseSnapshot(value: unknown): Snapshot | null {
   }
 
   if (!Array.isArray(planets) || !Array.isArray(fleets)) {
+    return null;
+  }
+  if (playerColors !== undefined && !Array.isArray(playerColors)) {
     return null;
   }
 
@@ -221,6 +244,15 @@ function parseSnapshot(value: unknown): Snapshot | null {
     parsedFleets.push(parsedFleet);
   }
 
+  const parsedPlayerColors: PlayerColor[] = [];
+  for (const playerColor of playerColors ?? []) {
+    const parsedPlayerColor = parsePlayerColor(playerColor);
+    if (parsedPlayerColor === null) {
+      return null;
+    }
+    parsedPlayerColors.push(parsedPlayerColor);
+  }
+
   return {
     tick,
     tickRate,
@@ -228,6 +260,7 @@ function parseSnapshot(value: unknown): Snapshot | null {
     height,
     planets: parsedPlanets,
     fleets: parsedFleets,
+    playerColors: parsedPlayerColors,
   };
 }
 
