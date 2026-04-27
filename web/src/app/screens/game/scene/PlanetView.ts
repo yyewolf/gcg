@@ -46,6 +46,8 @@ export class PlanetView extends Container {
   private selected = false;
   private pulse = 0;
   private readonly impacts: PlanetImpact[] = [];
+  private lastTone: OwnershipTone | null = null;
+  private lastShipText = "";
 
   constructor() {
     super();
@@ -61,14 +63,30 @@ export class PlanetView extends Container {
   }
 
   public sync(presentation: PlanetPresentation): void {
-    this.radius = presentation.planet.r;
+    const nextRadius = presentation.planet.r;
+    const nextShipText =
+      presentation.tone === "enemy" ? "?" : String(presentation.planet.ships);
+
+    if (this.radius !== nextRadius) {
+      this.radius = nextRadius;
+      this.lastTone = null;
+    }
+
+    if (!this.selected && presentation.selected) {
+      this.pulse = 0;
+    }
     this.selected = presentation.selected;
     this.position.set(presentation.planet.x, presentation.planet.y);
-    this.shipLabel.text =
-      presentation.tone === "enemy" ? "?" : String(presentation.planet.ships);
+    if (this.lastShipText !== nextShipText) {
+      this.shipLabel.text = nextShipText;
+      this.lastShipText = nextShipText;
+    }
     this.shipLabel.visible = true;
     this.growthLabel.visible = false;
-    this.draw(presentation.tone);
+    if (this.lastTone !== presentation.tone) {
+      this.draw(presentation.tone);
+      this.lastTone = presentation.tone;
+    }
   }
 
   public update(deltaMS: number): void {

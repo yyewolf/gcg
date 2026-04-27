@@ -94,6 +94,7 @@ export class DebugMenu extends Container {
     tick: null,
   };
   private open = false;
+  private lastRenderKey = "";
 
   constructor(private readonly callbacks: DebugMenuCallbacks) {
     super();
@@ -129,9 +130,18 @@ export class DebugMenu extends Container {
   }
 
   public render(model: DebugMenuModel): void {
+    const nextInfo = this.buildInfo(model);
+    const nextToggle = model.showPathPredictions ? "ON" : "OFF";
+    const nextKey = `${model.connectionStatus}|${model.fleetCount}|${model.inGame}|${model.joinedLobbyId ?? ""}|${model.lobbyPlayers}|${model.lobbyStatus ?? ""}|${model.mapName}|${model.planetCount}|${model.playerId ?? ""}|${model.showPathPredictions}|${model.tick ?? ""}`;
+
     this.model = model;
-    this.info.text = this.buildInfo(model);
-    this.toggleValue.text = model.showPathPredictions ? "ON" : "OFF";
+    if (this.lastRenderKey === nextKey) {
+      return;
+    }
+
+    this.lastRenderKey = nextKey;
+    this.info.text = nextInfo;
+    this.toggleValue.text = nextToggle;
     this.redraw();
   }
 

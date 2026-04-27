@@ -7,6 +7,9 @@ import { palette } from "../theme";
 
 import { HudButton } from "./HudButton";
 
+const shipLength = 9;
+const shipHalfWidth = 4.8;
+
 interface BattlePlanet {
   x: number;
   y: number;
@@ -17,6 +20,33 @@ interface BattlePlanet {
   orbitTilt: number;
   squadSize: number;
   phase: number;
+}
+
+interface BattleLane {
+  fromIndex: number;
+  toIndex: number;
+  tint: number;
+  speed: number;
+  phase: number;
+  squadSize: number;
+  sway: number;
+}
+
+interface OrbitShipMarker {
+  node: Graphics;
+  planetIndex: number;
+  shipIndex: number;
+}
+
+interface AttackShipMarker {
+  node: Graphics;
+  lane: BattleLane;
+  shipIndex: number;
+}
+
+interface ImpactRingMarker {
+  node: Graphics;
+  lane: BattleLane;
 }
 
 interface LobbyPanelCallbacks {
@@ -40,7 +70,8 @@ export class LobbyPanel extends Container {
 
   private readonly backdrop = new Graphics();
   private readonly stars = new Graphics();
-  private readonly battleScene = new Graphics();
+  private readonly battleStatic = new Graphics();
+  private readonly battleDynamic = new Container();
   private readonly panelGlow = new Graphics();
   private readonly panel = new Graphics();
   private readonly headerBand = new Graphics();
@@ -110,6 +141,39 @@ export class LobbyPanel extends Container {
   });
   private readonly playButton: HudButton;
   private currentModel: LobbyPanelModel | null = null;
+  private readonly battleLanes: BattleLane[] = [
+    {
+      fromIndex: 0,
+      toIndex: 1,
+      tint: palette.enemy,
+      speed: 0.00018,
+      phase: 0.1,
+      squadSize: 4,
+      sway: 18,
+    },
+    {
+      fromIndex: 1,
+      toIndex: 2,
+      tint: palette.accent,
+      speed: 0.00014,
+      phase: 0.44,
+      squadSize: 3,
+      sway: 14,
+    },
+    {
+      fromIndex: 2,
+      toIndex: 0,
+      tint: palette.friendly,
+      speed: 0.00016,
+      phase: 0.71,
+      squadSize: 4,
+      sway: 20,
+    },
+  ];
+  private battlePlanets: BattlePlanet[] = [];
+  private readonly orbitShips: OrbitShipMarker[] = [];
+  private readonly attackShips: AttackShipMarker[] = [];
+  private readonly impactRings: ImpactRingMarker[] = [];
   private viewportWidth = 0;
   private viewportHeight = 0;
   private panelX = 0;
@@ -139,7 +203,8 @@ export class LobbyPanel extends Container {
     this.addChild(
       this.backdrop,
       this.stars,
-      this.battleScene,
+      this.battleStatic,
+      this.battleDynamic,
       this.panelGlow,
       this.panel,
       this.headerBand,
@@ -206,11 +271,14 @@ export class LobbyPanel extends Container {
       1,
       this.panelHeight - this.headerHeight - this.footerHeight,
     );
+    this.battlePlanets = this.buildPlanets();
 
     this.drawBackdrop();
     this.drawStars();
     this.drawPanel();
-    this.drawBattleScene();
+    this.drawBattleStatic();
+    this.rebuildBattleMarkers();
+    this.updateBattleAnimation();
 
     this.title.position.set(
       this.panelX + this.panelWidth * 0.5,
@@ -271,7 +339,7 @@ export class LobbyPanel extends Container {
       return;
     }
 
-    this.drawBattleScene();
+    this.updateBattleAnimation();
   }
 
   public render(model: LobbyPanelModel): void {
@@ -406,64 +474,39 @@ export class LobbyPanel extends Container {
     this.listFrame.stroke({ color: palette.outline, width: 1, alpha: 0.42 });
   }
 
-  private drawBattleScene(): void {
-    this.battleScene.clear();
+  private drawBattleStatic(): void {
+    this.battleStatic.clear();
 
-    const planets = this.buildPlanets();
-    const time = this.animationTime;
-
-    for (const planet of planets) {
-      this.battleScene.circle(planet.x, planet.y, planet.radius * 1.85);
-      this.battleScene.fill({ color: planet.tint, alpha: 0.08 });
-      this.battleScene.circle(planet.x, planet.y, planet.radius * 1.12);
-      this.battleScene.fill({ color: planet.tint, alpha: 0.2 });
-      this.battleScene.circle(planet.x, planet.y, planet.radius);
-      this.battleScene.fill({ color: 0x10283c, alpha: 0.96 });
-      this.battleScene.circle(planet.x, planet.y, planet.radius);
-      this.battleScene.stroke({ color: planet.tint, width: 2, alpha: 0.92 });
-      this.battleScene.circle(planet.x, planet.y, planet.orbitRadius);
-      this.battleScene.stroke({ color: planet.tint, width: 1.2, alpha: 0.22 });
-
-      for (let shipIndex = 0; shipIndex < planet.squadSize; shipIndex += 1) {
-        const angle =
-          time * planet.orbitSpeed +
-          shipIndex * ((Math.PI * 2) / planet.squadSize) +
-          planet.phase;
-        const orbitX = planet.x + Math.cos(angle) * planet.orbitRadius;
-        const orbitY =
-          planet.y + Math.sin(angle) * planet.orbitRadius * planet.orbitTilt;
-        const heading = angle + Math.PI * 0.5;
-        this.drawShip(orbitX, orbitY, heading, planet.tint, 1);
-      }
+    for (const planet of this.battlePlanets) {
+      this.battleStatic.circle(planet.x, planet.y, planet.radius * 1.85);
+      this.battleStatic.fill({ color: planet.tint, alpha: 0.08 });
+      this.battleStatic.circle(planet.x, planet.y, planet.radius * 1.12);
+      this.battleStatic.fill({ color: planet.tint, alpha: 0.2 });
+      this.battleStatic.circle(planet.x, planet.y, planet.radius);
+      this.battleStatic.fill({ color: 0x10283c, alpha: 0.96 });
+      this.battleStatic.circle(planet.x, planet.y, planet.radius);
+      this.battleStatic.stroke({ color: planet.tint, width: 2, alpha: 0.92 });
+      this.battleStatic.circle(planet.x, planet.y, planet.orbitRadius);
+      this.battleStatic.stroke({ color: planet.tint, width: 1.2, alpha: 0.22 });
     }
 
-    this.drawAttackLane(
-      planets[0],
-      planets[1],
-      palette.enemy,
-      0.00018,
-      0.1,
-      4,
-      18,
-    );
-    this.drawAttackLane(
-      planets[1],
-      planets[2],
-      palette.accent,
-      0.00014,
-      0.44,
-      3,
-      14,
-    );
-    this.drawAttackLane(
-      planets[2],
-      planets[0],
-      palette.friendly,
-      0.00016,
-      0.71,
-      4,
-      20,
-    );
+    for (const lane of this.battleLanes) {
+      const from = this.battlePlanets[lane.fromIndex];
+      const to = this.battlePlanets[lane.toIndex];
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const beamEndX = to.x - (dx / distance) * to.radius * 0.8;
+      const beamEndY = to.y - (dy / distance) * to.radius * 0.8;
+
+      this.battleStatic.moveTo(from.x, from.y);
+      this.battleStatic.lineTo(beamEndX, beamEndY);
+      this.battleStatic.stroke({
+        color: lane.tint,
+        width: 1.4,
+        alpha: 0.16,
+      });
+    }
   }
 
   private buildPlanets(): BattlePlanet[] {
@@ -522,74 +565,118 @@ export class LobbyPanel extends Container {
     ];
   }
 
-  private drawAttackLane(
-    from: BattlePlanet,
-    to: BattlePlanet,
-    tint: number,
-    speed: number,
-    phase: number,
-    squadSize: number,
-    sway: number,
-  ): void {
-    const impactPulse =
-      0.55 + 0.45 * Math.sin(this.animationTime * 0.004 + phase * 8);
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const distance = Math.hypot(dx, dy) || 1;
-    const normalX = -dy / distance;
-    const normalY = dx / distance;
-    const beamEndX = to.x - (dx / distance) * to.radius * 0.8;
-    const beamEndY = to.y - (dy / distance) * to.radius * 0.8;
+  private rebuildBattleMarkers(): void {
+    for (const marker of this.orbitShips) {
+      marker.node.destroy();
+    }
+    for (const marker of this.attackShips) {
+      marker.node.destroy();
+    }
+    for (const ring of this.impactRings) {
+      ring.node.destroy();
+    }
 
-    this.battleScene.moveTo(from.x, from.y);
-    this.battleScene.lineTo(beamEndX, beamEndY);
-    this.battleScene.stroke({
-      color: tint,
-      width: 1.4,
-      alpha: 0.12 + impactPulse * 0.1,
+    this.orbitShips.length = 0;
+    this.attackShips.length = 0;
+    this.impactRings.length = 0;
+    this.battleDynamic.removeChildren();
+
+    this.battlePlanets.forEach((planet, planetIndex) => {
+      for (let shipIndex = 0; shipIndex < planet.squadSize; shipIndex += 1) {
+        const node = new Graphics();
+        this.drawShipGlyph(node, planet.tint, 1);
+        this.orbitShips.push({ node, planetIndex, shipIndex });
+        this.battleDynamic.addChild(node);
+      }
     });
 
-    this.battleScene.circle(
-      beamEndX,
-      beamEndY,
-      to.radius * (0.2 + impactPulse * 0.24),
-    );
-    this.battleScene.stroke({ color: tint, width: 1.4, alpha: 0.3 });
+    for (const lane of this.battleLanes) {
+      const ring = new Graphics();
+      ring.circle(0, 0, 1);
+      ring.stroke({ color: lane.tint, width: 1.4, alpha: 1 });
+      this.impactRings.push({ node: ring, lane });
+      this.battleDynamic.addChild(ring);
 
-    for (let shipIndex = 0; shipIndex < squadSize; shipIndex += 1) {
-      const progress =
-        (this.animationTime * speed + phase + shipIndex / squadSize) % 1;
-      const x =
-        from.x +
-        dx * progress +
-        normalX * Math.sin(progress * 9 + phase * 7) * sway;
-      const y =
-        from.y +
-        dy * progress +
-        normalY * Math.sin(progress * 9 + phase * 7) * sway;
-      this.drawShip(x, y, Math.atan2(dy, dx), tint, 0.9);
+      for (let shipIndex = 0; shipIndex < lane.squadSize; shipIndex += 1) {
+        const node = new Graphics();
+        this.drawShipGlyph(node, lane.tint, 0.9);
+        this.attackShips.push({ node, lane, shipIndex });
+        this.battleDynamic.addChild(node);
+      }
     }
   }
 
-  private drawShip(
-    x: number,
-    y: number,
-    angle: number,
-    tint: number,
-    alpha: number,
-  ): void {
-    const noseX = x + Math.cos(angle) * 9;
-    const noseY = y + Math.sin(angle) * 9;
-    const rearLeftX = x + Math.cos(angle + 2.55) * 6;
-    const rearLeftY = y + Math.sin(angle + 2.55) * 6;
-    const rearRightX = x + Math.cos(angle - 2.55) * 6;
-    const rearRightY = y + Math.sin(angle - 2.55) * 6;
+  private updateBattleAnimation(): void {
+    const time = this.animationTime;
 
-    this.battleScene.moveTo(noseX, noseY);
-    this.battleScene.lineTo(rearLeftX, rearLeftY);
-    this.battleScene.lineTo(rearRightX, rearRightY);
-    this.battleScene.closePath();
-    this.battleScene.fill({ color: tint, alpha });
+    for (const marker of this.orbitShips) {
+      const planet = this.battlePlanets[marker.planetIndex];
+      const angle =
+        time * planet.orbitSpeed +
+        marker.shipIndex * ((Math.PI * 2) / planet.squadSize) +
+        planet.phase;
+      marker.node.position.set(
+        planet.x + Math.cos(angle) * planet.orbitRadius,
+        planet.y + Math.sin(angle) * planet.orbitRadius * planet.orbitTilt,
+      );
+      marker.node.rotation = angle + Math.PI * 0.5;
+    }
+
+    for (const marker of this.attackShips) {
+      const from = this.battlePlanets[marker.lane.fromIndex];
+      const to = this.battlePlanets[marker.lane.toIndex];
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const normalX = -dy / distance;
+      const normalY = dx / distance;
+      const progress =
+        (time * marker.lane.speed +
+          marker.lane.phase +
+          marker.shipIndex / marker.lane.squadSize) %
+        1;
+
+      marker.node.position.set(
+        from.x +
+          dx * progress +
+          normalX *
+            Math.sin(progress * 9 + marker.lane.phase * 7) *
+            marker.lane.sway,
+        from.y +
+          dy * progress +
+          normalY *
+            Math.sin(progress * 9 + marker.lane.phase * 7) *
+            marker.lane.sway,
+      );
+      marker.node.rotation = Math.atan2(dy, dx);
+    }
+
+    for (const ring of this.impactRings) {
+      const from = this.battlePlanets[ring.lane.fromIndex];
+      const to = this.battlePlanets[ring.lane.toIndex];
+      const dx = to.x - from.x;
+      const dy = to.y - from.y;
+      const distance = Math.hypot(dx, dy) || 1;
+      const beamEndX = to.x - (dx / distance) * to.radius * 0.8;
+      const beamEndY = to.y - (dy / distance) * to.radius * 0.8;
+      const impactPulse =
+        0.55 +
+        0.45 * Math.sin(this.animationTime * 0.004 + ring.lane.phase * 8);
+
+      ring.node.position.set(beamEndX, beamEndY);
+      ring.node.scale.set(to.radius * (0.2 + impactPulse * 0.24));
+      ring.node.alpha = 0.18 + impactPulse * 0.18;
+    }
+  }
+
+  private drawShipGlyph(node: Graphics, tint: number, alpha: number): void {
+    node.clear();
+    node.moveTo(shipLength, 0);
+    node.lineTo(-shipLength * 0.45, -shipHalfWidth);
+    node.lineTo(-shipLength * 0.9, 0);
+    node.lineTo(-shipLength * 0.45, shipHalfWidth);
+    node.closePath();
+    node.fill({ color: tint, alpha });
   }
 
   private buildStatus(model: LobbyPanelModel): string {

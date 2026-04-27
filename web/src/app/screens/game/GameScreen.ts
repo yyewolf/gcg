@@ -67,6 +67,9 @@ export class GameScreen extends Container {
   private sendPercentage = 50;
   private showDebugPathPredictions = false;
   private snapshot: Snapshot | null = null;
+  private lastBoardSyncSnapshot: Snapshot | null = null;
+  private lastBoardSyncPlayerID: number | null = null;
+  private lastBoardSyncSelectionKey = "";
   private readonly onContextMenu = (event: MouseEvent) => {
     event.preventDefault();
   };
@@ -391,11 +394,25 @@ export class GameScreen extends Container {
     this.hud.visible = inGame;
     this.lobbyPanel.visible = !inGame;
     this.resultPopup.visible = this.result !== null;
-    this.board.sync(
-      inGame ? this.snapshot : null,
-      this.playerID,
-      this.selectedSourceIDs,
-    );
+    const selectionKey = inGame
+      ? Array.from(this.selectedSourceIDs)
+          .sort((a, b) => a - b)
+          .join(",")
+      : "";
+    if (
+      this.lastBoardSyncSnapshot !== (inGame ? this.snapshot : null) ||
+      this.lastBoardSyncPlayerID !== this.playerID ||
+      this.lastBoardSyncSelectionKey !== selectionKey
+    ) {
+      this.board.sync(
+        inGame ? this.snapshot : null,
+        this.playerID,
+        this.selectedSourceIDs,
+      );
+      this.lastBoardSyncSnapshot = inGame ? this.snapshot : null;
+      this.lastBoardSyncPlayerID = this.playerID;
+      this.lastBoardSyncSelectionKey = selectionKey;
+    }
 
     if (inGame) {
       this.hud.render({
