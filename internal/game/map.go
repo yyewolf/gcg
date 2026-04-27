@@ -10,6 +10,7 @@ import (
 const (
 	defaultMapWidth          = 3200.0
 	defaultMapHeight         = 2200.0
+	mapScaleStartPlayers     = 6
 	mapEdgePadding           = 120.0
 	defaultPlayerCount       = 10
 	minPlayerCount           = 2
@@ -59,8 +60,7 @@ func newRandomMapLayoutWithConfig(config MapConfig) mapLayout {
 	seed := time.Now().UnixNano()
 	rng := rand.New(rand.NewSource(seed))
 
-	width := defaultMapWidth
-	height := defaultMapHeight
+	width, height := resolveMapDimensions(config.PlayerCount)
 	planets := make(map[int]*Planet)
 	nextID := addHomePlanets(planets, width, height, config.PlayerCount)
 	nextID = addLocalNeutralPlanets(planets, nextID, width, height, config.PlayerCount, rng)
@@ -73,6 +73,15 @@ func newRandomMapLayoutWithConfig(config MapConfig) mapLayout {
 		Height:  height,
 		Planets: planets,
 	}
+}
+
+func resolveMapDimensions(playerCount int) (float64, float64) {
+	if playerCount <= mapScaleStartPlayers {
+		return defaultMapWidth, defaultMapHeight
+	}
+
+	scale := math.Sqrt(float64(playerCount) / float64(mapScaleStartPlayers))
+	return defaultMapWidth * scale, defaultMapHeight * scale
 }
 
 func addHomePlanets(planets map[int]*Planet, width, height float64, playerCount int) int {

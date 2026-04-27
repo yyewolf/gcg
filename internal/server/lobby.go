@@ -264,11 +264,8 @@ func (lobby *lobby) broadcastState(tick int64) {
 	}
 
 	for _, client := range clients {
-		client.sendJSON(outboundMessage{
-			Type:  "state",
-			Tick:  tick,
-			State: engine.SnapshotForPlayer(client.playerIDValue()),
-		})
+		snapshot := engine.SnapshotForPlayer(client.playerIDValue())
+		client.sendJSON(newCompactStateMessage(snapshot))
 	}
 }
 

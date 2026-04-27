@@ -99,7 +99,7 @@ func (client *client) writeLoop() {
 	}
 }
 
-func (client *client) sendJSON(payload outboundMessage) {
+func (client *client) sendJSON(payload any) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		log.Printf("marshal client payload failed: %v", err)

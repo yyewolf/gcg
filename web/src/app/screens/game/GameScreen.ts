@@ -16,6 +16,7 @@ import type {
   WelcomeMessage,
   StateMessage,
 } from "../../game/protocol";
+import { defaultPlayerColor } from "./theme";
 
 import { GameBoard } from "./scene/GameBoard";
 import { GameHud } from "./ui/GameHud";
@@ -182,7 +183,7 @@ export class GameScreen extends Container {
         this.connectionStatus = "open";
         return;
       case "state":
-        this.applySnapshot(message.state);
+        this.applyStateUpdate(message);
         return;
       case "error":
         this.errorMessage = message.error;
@@ -240,6 +241,38 @@ export class GameScreen extends Container {
     }
 
     this.render();
+  }
+
+  private applyStateUpdate(message: StateMessage): void {
+    if (this.snapshot === null) {
+      return;
+    }
+
+    const planetUpdates = new Map(
+      message.planets.map((planet) => [planet.id, planet] as const),
+    );
+    const nextSnapshot: Snapshot = {
+      tick: message.tick,
+      tickRate: message.tickRate,
+      width: this.snapshot.width,
+      height: this.snapshot.height,
+      planets: this.snapshot.planets.map((planet) => {
+        const update = planetUpdates.get(planet.id);
+        if (update === undefined) {
+          return planet;
+        }
+
+        return {
+          ...planet,
+          owner: update.owner,
+          ships: update.ships,
+        };
+      }),
+      fleets: message.fleets,
+      playerColors: this.snapshot.playerColors,
+    };
+
+    this.applySnapshot(nextSnapshot);
   }
 
   private handlePlanetActivate(planetID: number, additive: boolean): void {
@@ -415,8 +448,11 @@ export class GameScreen extends Container {
     }
 
     if (inGame) {
+      const playerID = this.playerID ?? 0;
       this.hud.render({
         sendPercentage: this.sendPercentage,
+        playerColor: this.resolveCurrentPlayerColor(),
+        playerId: playerID,
       });
     } else {
       this.lobbyPanel.render({
@@ -457,5 +493,16 @@ export class GameScreen extends Container {
     }
 
     return null;
+  }
+
+  private resolveCurrentPlayerColor(): number {
+    if (this.playerID === null) {
+      return defaultPlayerColor(0);
+    }
+
+    const playerColor = this.snapshot?.playerColors.find(
+      (entry) => entry.playerId === this.playerID,
+    );
+    return playerColor?.color ?? defaultPlayerColor(this.playerID);
   }
 }

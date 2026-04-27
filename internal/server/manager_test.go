@@ -233,3 +233,48 @@ func TestPlayJoinsAvailableLobby(t *testing.T) {
 		t.Fatal("expected play to keep the player in the same available lobby")
 	}
 }
+
+func TestCompactStateMessageOmitsStaticSnapshotFields(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := json.Marshal(newCompactStateMessage(game.Snapshot{
+		Tick:     7,
+		TickRate: 30,
+		Width:    200,
+		Height:   100,
+		Planets: []game.Planet{
+			{ID: 1, Owner: 2, Ships: 18, Radius: 40, X: 10, Y: 20},
+		},
+		Fleets: []game.Fleet{
+			{ID: 4, Owner: 2, SourceID: 1, TargetID: 3, Ships: 5, X: 11.5, Y: 22.5, VX: 3.5, VY: -1.5},
+		},
+		PlayerColors: []game.PlayerColor{{PlayerID: 2, Color: 0xff728c}},
+	}))
+	if err != nil {
+		t.Fatalf("marshal compact state message: %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal compact state message: %v", err)
+	}
+
+	if _, ok := decoded["state"]; ok {
+		t.Fatal("expected compact state payload to omit full state field")
+	}
+	if _, ok := decoded["p"]; !ok {
+		t.Fatal("expected compact state payload to include planet updates")
+	}
+	if _, ok := decoded["f"]; !ok {
+		t.Fatal("expected compact state payload to include fleet updates")
+	}
+	if _, ok := decoded["r"]; !ok {
+		t.Fatal("expected compact state payload to include tick rate")
+	}
+	if _, ok := decoded["width"]; ok {
+		t.Fatal("expected compact state payload to omit width")
+	}
+	if _, ok := decoded["playerColors"]; ok {
+		t.Fatal("expected compact state payload to omit player colors")
+	}
+}

@@ -29,18 +29,18 @@ var playerColorPalette = []int{
 }
 
 type Engine struct {
-	mu          sync.RWMutex
-	tick        int64
-	tickRate    int
-	fleetSpeed  float64
-	growthTimer float64
-	worldWidth  float64
-	worldHeight float64
-	planets     map[int]*Planet
-	planetIndex *planetSpatialIndex
-	fleets      map[int]*Fleet
-	nextFleetID int
-	mapName     string
+	mu           sync.RWMutex
+	tick         int64
+	tickRate     int
+	fleetSpeed   float64
+	growthTimer  float64
+	worldWidth   float64
+	worldHeight  float64
+	planets      map[int]*Planet
+	planetIndex  *planetSpatialIndex
+	fleets       map[int]*Fleet
+	nextFleetID  int
+	mapName      string
 	playerColors []PlayerColor
 }
 
@@ -53,15 +53,15 @@ func NewEngineWithConfig(config MapConfig) *Engine {
 	mapLayout := newRandomMapLayoutWithConfig(config)
 
 	return &Engine{
-		tickRate:    DefaultIdleTickRate,
-		fleetSpeed:  defaultFleetSpeedUPS,
-		worldWidth:  mapLayout.Width,
-		worldHeight: mapLayout.Height,
-		planets:     mapLayout.Planets,
-		planetIndex: newPlanetSpatialIndex(mapLayout.Planets),
-		fleets:      make(map[int]*Fleet),
-		nextFleetID: 1,
-		mapName:     mapLayout.Name,
+		tickRate:     DefaultIdleTickRate,
+		fleetSpeed:   defaultFleetSpeedUPS,
+		worldWidth:   mapLayout.Width,
+		worldHeight:  mapLayout.Height,
+		planets:      mapLayout.Planets,
+		planetIndex:  newPlanetSpatialIndex(mapLayout.Planets),
+		fleets:       make(map[int]*Fleet),
+		nextFleetID:  1,
+		mapName:      mapLayout.Name,
 		playerColors: resolvePlayerColors(config.PlayerCount),
 	}
 }

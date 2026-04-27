@@ -80,3 +80,15 @@ func TestRandomMapLayoutHonorsConfiguredPlayerCount(t *testing.T) {
 		}
 	}
 }
+
+func TestRandomMapLayoutScalesForMorePlayers(t *testing.T) {
+	sixPlayerLayout := newRandomMapLayoutWithConfig(MapConfig{PlayerCount: 6})
+	twelvePlayerLayout := newRandomMapLayoutWithConfig(MapConfig{PlayerCount: 12})
+
+	if twelvePlayerLayout.Width <= sixPlayerLayout.Width {
+		t.Fatalf("expected 12-player map to be wider than 6-player map, got %.0f <= %.0f", twelvePlayerLayout.Width, sixPlayerLayout.Width)
+	}
+	if twelvePlayerLayout.Height <= sixPlayerLayout.Height {
+		t.Fatalf("expected 12-player map to be taller than 6-player map, got %.0f <= %.0f", twelvePlayerLayout.Height, sixPlayerLayout.Height)
+	}
+}

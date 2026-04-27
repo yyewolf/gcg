@@ -25,6 +25,12 @@ export interface PlayerColor {
   color: number;
 }
 
+export interface PlanetStateUpdate {
+  id: number;
+  owner: number;
+  ships: number;
+}
+
 export interface Snapshot {
   tick: number;
   tickRate: number;
@@ -66,7 +72,9 @@ export interface WelcomeMessage {
 export interface StateMessage {
   t: "state";
   tick: number;
-  state: Snapshot;
+  tickRate: number;
+  planets: PlanetStateUpdate[];
+  fleets: FleetSnapshot[];
 }
 
 export interface GameOverMessage {
@@ -201,6 +209,42 @@ function parsePlayerColor(value: unknown): PlayerColor | null {
   }
 
   return { playerId, color };
+}
+
+function parsePlanetStateUpdate(value: unknown): PlanetStateUpdate | null {
+  if (!Array.isArray(value) || value.length !== 3) {
+    return null;
+  }
+
+  const [id, owner, ships] = value;
+  if (!isNumber(id) || !isNumber(owner) || !isNumber(ships)) {
+    return null;
+  }
+
+  return { id, owner, ships };
+}
+
+function parseCompactFleet(value: unknown): FleetSnapshot | null {
+  if (!Array.isArray(value) || value.length !== 9) {
+    return null;
+  }
+
+  const [id, owner, src, dst, ships, x, y, vx, vy] = value;
+  if (
+    !isNumber(id) ||
+    !isNumber(owner) ||
+    !isNumber(src) ||
+    !isNumber(dst) ||
+    !isNumber(ships) ||
+    !isNumber(x) ||
+    !isNumber(y) ||
+    !isNumber(vx) ||
+    !isNumber(vy)
+  ) {
+    return null;
+  }
+
+  return { id, owner, src, dst, ships, x, y, vx, vy };
 }
 
 function parseSnapshot(value: unknown): Snapshot | null {
@@ -358,12 +402,54 @@ export function parseServerMessage(raw: string): ServerMessage | null {
         return null;
       }
 
+      if (
+        isNumber(parsed.r) &&
+        Array.isArray(parsed.p) &&
+        Array.isArray(parsed.f)
+      ) {
+        const planets: PlanetStateUpdate[] = [];
+        for (const planet of parsed.p) {
+          const parsedPlanet = parsePlanetStateUpdate(planet);
+          if (parsedPlanet === null) {
+            return null;
+          }
+          planets.push(parsedPlanet);
+        }
+
+        const fleets: FleetSnapshot[] = [];
+        for (const fleet of parsed.f) {
+          const parsedFleet = parseCompactFleet(fleet);
+          if (parsedFleet === null) {
+            return null;
+          }
+          fleets.push(parsedFleet);
+        }
+
+        return {
+          t: "state",
+          tick: parsed.tick,
+          tickRate: parsed.r,
+          planets,
+          fleets,
+        };
+      }
+
       const state = parseSnapshot(parsed.state);
       if (state === null) {
         return null;
       }
 
-      return { t: "state", tick: parsed.tick, state };
+      return {
+        t: "state",
+        tick: parsed.tick,
+        tickRate: state.tickRate,
+        planets: state.planets.map((planet) => ({
+          id: planet.id,
+          owner: planet.owner,
+          ships: planet.ships,
+        })),
+        fleets: state.fleets,
+      };
     }
     case "gameover": {
       if (!isNumber(parsed.winnerId)) {

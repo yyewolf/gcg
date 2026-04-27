@@ -23,6 +23,13 @@ interface DebugMenuCallbacks {
 }
 
 export class DebugMenu extends Container {
+  private static readonly panelWidth = 256;
+  private static readonly panelPadding = 16;
+  private static readonly panelTopInset = 14;
+  private static readonly triggerHeight = 30;
+  private static readonly toggleHeight = 40;
+  private static readonly infoTop = 40;
+  private static readonly infoBottomGap = 14;
   private readonly trigger = new Container();
   private readonly triggerBg = new Graphics();
   private readonly triggerLabel = new Text({
@@ -153,26 +160,36 @@ export class DebugMenu extends Container {
 
   private redraw(): void {
     this.triggerBg.clear();
-    this.triggerBg.roundRect(0, 0, 72, 30, 12);
+    this.triggerBg.roundRect(0, 0, 72, DebugMenu.triggerHeight, 12);
     this.triggerBg.fill({ color: palette.panel, alpha: 0.88 });
-    this.triggerBg.roundRect(0, 0, 72, 30, 12);
+    this.triggerBg.roundRect(0, 0, 72, DebugMenu.triggerHeight, 12);
     this.triggerBg.stroke({
       color: this.open ? palette.accent : palette.outline,
       width: 1.5,
       alpha: 0.95,
     });
-    this.triggerLabel.position.set(36, 15);
+    this.triggerLabel.position.set(36, DebugMenu.triggerHeight * 0.5);
 
     this.panel.position.set(0, 40);
 
+    const infoHeight = Math.max(this.info.height, 18);
+    const toggleY = Math.ceil(
+      DebugMenu.infoTop + infoHeight + DebugMenu.infoBottomGap,
+    );
+    const panelHeight =
+      toggleY + DebugMenu.toggleHeight + DebugMenu.panelPadding;
+
     this.panelBg.clear();
-    this.panelBg.roundRect(0, 0, 256, 144, 18);
+    this.panelBg.roundRect(0, 0, DebugMenu.panelWidth, panelHeight, 18);
     this.panelBg.fill({ color: palette.panel, alpha: 0.92 });
-    this.panelBg.roundRect(0, 0, 256, 144, 18);
+    this.panelBg.roundRect(0, 0, DebugMenu.panelWidth, panelHeight, 18);
     this.panelBg.stroke({ color: palette.outline, width: 1.5, alpha: 1 });
 
-    this.panelTitle.position.set(16, 14);
-    this.info.position.set(16, 40);
+    this.panelTitle.position.set(
+      DebugMenu.panelPadding,
+      DebugMenu.panelTopInset,
+    );
+    this.info.position.set(DebugMenu.panelPadding, DebugMenu.infoTop);
 
     this.toggleBg.clear();
     this.toggleBg.roundRect(0, 0, 224, 40, 12);
@@ -185,7 +202,7 @@ export class DebugMenu extends Container {
       width: 1.5,
       alpha: 0.92,
     });
-    this.toggleRow.position.set(16, 92);
+    this.toggleRow.position.set(DebugMenu.panelPadding, toggleY);
     this.toggleLabel.position.set(14, 20);
     this.toggleValue.position.set(210, 20);
   }
