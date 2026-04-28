@@ -7,8 +7,10 @@ The most important code paths live in these files:
 - `internal/game/engine.go`
 - `internal/game/avoidance.go`
 - `internal/game/collision.go`
+- `internal/game/merge.go`
+- `internal/game/tickrate.go`
 - `internal/game/types.go`
-- `internal/server/hub.go`
+- `internal/server/manager.go`
 - `web/src/app/screens/game/scene/GameBoard.ts`
 - `web/src/app/screens/game/scene/FleetView.ts`
 - `web/src/app/screens/game/scene/PlanetView.ts`
@@ -17,16 +19,18 @@ The most important code paths live in these files:
 
 The server is authoritative.
 
-Planets and fleets live only in memory. The server advances the simulation at a fixed tick rate and broadcasts snapshots over WebSocket.
+Planets and fleets live only in memory. The server advances the simulation at an adaptive tick rate and broadcasts snapshots over WebSocket. The tick rate drops to 5 Hz when the simulation is calm and rises to 15 Hz whenever any fleet is near a collision boundary, preventing tunnelling while keeping the simulation cheap at rest.
 
 At a high level each tick does this:
 
 1. Increment the global tick.
-2. Move all fleets.
+2. Steer and move all fleets; resolve planet-surface collisions and arrivals inline.
 3. Resolve fleet-fleet collisions.
-4. Recompute ETA for active fleets.
-5. Grow owned planets once per second.
-6. Emit a sorted snapshot.
+4. Merge nearby same-owner same-route fleet bundles.
+5. Grow owned planets every 2 seconds.
+6. Resolve the dynamic tick rate for the next tick.
+7. Check for a winner.
+8. Emit a sorted snapshot.
 
 The relevant entrypoint is `Engine.Advance()`.
 
@@ -54,9 +58,7 @@ Each fleet stores:
 - velocity `(vx, vy)`
 - avoidance memory for the currently selected blocking planet
 
-Important detail: the current backend uses one simulated fleet entity per ship for launched groups.
-
-That means launching `40` ships creates `40` fleet entities with `Ships = 1` each.
+Fleet entities carry a `Ships` count of one or more. At launch, ships are grouped into bundles by `launchFleetBundleSize`. Below `fleetMergeActivationStep` (500) projected fleet entities the bundle size is 1, preserving the one-entity-per-ship behaviour. Above that threshold the bundle size grows with `dynamicFleetMergeMaxShips` to keep entity count manageable. Bundles can grow further during simulation through in-flight merging (see section 7.3).
 
 ## 3. Fleet Launch Algorithm
 
@@ -66,7 +68,8 @@ When the player sends ships:
 2. Compute `shipsToSend = source.Ships * percentage / 100`.
 3. Subtract ships from the source planet.
 4. Compute the straight-line travel vector toward the target.
-5. Spawn one backend fleet per ship.
+5. Determine the bundle size with `launchFleetBundleSize(currentFleetCount, shipsToSend)`: 1 ship per entity when the projected fleet count is below `fleetMergeActivationStep` (500), larger above it.
+6. Spawn one fleet entity per ring slot, each carrying `bundleSize` ships.
 
 ### Ring-Based Spawn
 
@@ -284,6 +287,29 @@ For each nearby pair closer than `fleetSeparationDistance`:
 
 This is not a full rigid-body solver. It is a light pairwise separation step designed to be cheap and visually stable.
 
+### 7.3 Fleet Merging
+
+After collision resolution, the engine coalesces nearby fleet bundles to keep entity count manageable at scale.
+
+Merging is skipped entirely when total fleet count is below `fleetMergeActivationStep` (500) to avoid overhead during normal play.
+
+Two fleet entities can merge when all of these hold:
+
+- same owner
+- same source and target planet
+- same avoidance state (`AvoidPlanetID` and `AvoidClockwise` match)
+- distance between them is less than `fleetMergeDistance` (12 units)
+- heading dot-product is at least `fleetMergeHeadingDot` (0.985), meaning they are flying almost parallel
+- combined ship count does not exceed `dynamicFleetMergeMaxShips(currentFleetCount)`, which starts at 2 and grows by 1 for every `fleetMergeScaleStep` (600) additional fleet entities, capped at 32
+
+When a merge happens, the primary entity absorbs the secondary:
+
+- position and velocity are blended as ship-count-weighted averages
+- ship counts are summed
+- the earlier of the two `LaunchTick` and `ETA` values is kept
+
+The collision spatial index built by `moveFleets` is reused for this pass, so no extra index construction is needed.
+
 ## 8. Spatial Acceleration Structure
 
 The main optimization for large fleet counts is a uniform spatial grid.
@@ -327,27 +353,21 @@ The combat rule is simple:
 - otherwise subtract ships
 - if the result goes negative, ownership flips and the absolute remainder becomes the new ship count
 
-Because the backend currently launches one fleet entity per ship, arrivals happen as many small repeated updates rather than one large lump.
-
-That is useful for visuals and fine-grained behavior, but it also increases total entity count and simulation load.
+Each arriving fleet entity contributes all of its ships at once to the combat resolution.
 
 ## 10. ETA Estimation
 
 ETA is not a guaranteed arrival contract.
 
-It is a rolling estimate recomputed every tick from straight-line distance to the target edge:
+It is computed once at launch from the straight-line travel time between source and target:
 
 $$
-remaining = distance(current, targetCenter) - (targetRadius + fleetCollisionRadius)
+ETA = launchTick + \left\lceil \frac{distance(source, target)}{fleetSpeed} \cdot tickRate \right\rceil
 $$
 
-Then:
+It is stored on the fleet internally but is **not** included in snapshots sent to clients (`json:"-"`). It is only updated during fleet merges, where the earlier of the two merged values is kept.
 
-$$
-ETA = currentTick + \left\lceil \frac{remaining / fleetSpeed}{tickDuration} \right\rceil
-$$
-
-Because avoidance and collisions can change the actual path, ETA is only approximate.
+Because avoidance and planet collisions lengthen the actual path, ETA is an optimistic lower bound rather than a precise arrival tick.
 
 ## 11. Snapshot Production
 
@@ -401,16 +421,16 @@ For `P` planets and `F` fleets:
 - blocking-planet scan per fleet: `O(P)`
 - steering neighbor scan per fleet: roughly local, not global, due to the grid
 - collision neighbor scan per fleet: roughly local, not global, due to the grid
-- snapshot serialization: `O(P log P + F log F)` because ids are sorted
+- snapshot serialization: `O(P + F)` (planet IDs are sorted once at engine creation; fleet IDs are maintained sorted by appending (monotonically increasing), so no sort is needed at snapshot time)
 
 Given the current map size, planets are few and cheap. Fleet count is the dominant cost.
 
 The main expensive pieces today are:
 
-- one entity per ship
+- entity count scales with ship counts even with bundling active
 - per-fleet path-side selection around planets
-- per-tick rebuilding of the spatial index
-- sorting fleets for snapshots
+- per-tick rebuilding of the fleet spatial index (the planet index is built once at engine creation and reused)
+- fleet merge scan over all entities when above the activation threshold
 
 ## 14. Current Tradeoffs
 
@@ -426,8 +446,8 @@ The current design deliberately favors clarity and gameplay experimentation over
 
 ### Costs
 
-- one ship per entity increases memory, update cost, and snapshot size
-- ETA is approximate, not exact
+- entity count still scales with ship counts; bundling limits the worst case but does not eliminate it
+- ETA is an optimistic launch-time estimate, not an exact arrival tick
 - path selection still reasons about one blocking planet at a time rather than solving a global multi-obstacle shortest path
 - snapshot broadcasts can become heavy at large fleet counts
 
@@ -435,10 +455,9 @@ The current design deliberately favors clarity and gameplay experimentation over
 
 The next likely algorithmic upgrades would be:
 
-1. fleet batching for networking while keeping per-ship backend simulation
-2. multi-obstacle lookahead instead of single-blocking-planet routing
-3. persistent spatial index reuse between steering and collision passes
-4. snapshot delta compression
-5. parallel simulation or lock-free staging if entity counts continue rising
+1. multi-obstacle lookahead instead of single-blocking-planet routing
+2. snapshot delta compression
+3. parallel simulation or lock-free staging if entity counts continue rising
+4. finer bundle size tuning or a continuous merge strategy rather than step-function thresholds
 
 For now, the current system is a good compromise between readable code, convincing motion, and moderate-scale performance.
