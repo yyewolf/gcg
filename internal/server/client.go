@@ -2,7 +2,7 @@ package server
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -84,12 +84,16 @@ func (client *client) writeLoop() {
 				return
 			}
 
-			client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				return
+			}
 			if err := client.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 		case <-pingTicker.C:
-			client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+			if err := client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				return
+			}
 			if err := client.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
@@ -102,7 +106,7 @@ func (client *client) writeLoop() {
 func (client *client) sendJSON(payload any) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
-		log.Printf("marshal client payload failed: %v", err)
+		slog.Error("marshal client payload failed", "err", err)
 		return
 	}
 

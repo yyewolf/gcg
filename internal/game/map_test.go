@@ -3,6 +3,8 @@ package game
 import "testing"
 
 func TestRandomMapLayoutProducesLargeDenseTenPlayerMap(t *testing.T) {
+	t.Parallel()
+
 	layout := newRandomMapLayoutWithConfig(MapConfig{PlayerCount: 10})
 
 	if layout.Width < 3000 {
@@ -53,6 +55,8 @@ func TestRandomMapLayoutProducesLargeDenseTenPlayerMap(t *testing.T) {
 }
 
 func TestRandomMapLayoutHonorsConfiguredPlayerCount(t *testing.T) {
+	t.Parallel()
+
 	layout := newRandomMapLayoutWithConfig(MapConfig{PlayerCount: 6})
 
 	owners := make(map[int]bool)
@@ -82,6 +86,8 @@ func TestRandomMapLayoutHonorsConfiguredPlayerCount(t *testing.T) {
 }
 
 func TestRandomMapLayoutScalesForMorePlayers(t *testing.T) {
+	t.Parallel()
+
 	sixPlayerLayout := newRandomMapLayoutWithConfig(MapConfig{PlayerCount: 6})
 	twelvePlayerLayout := newRandomMapLayoutWithConfig(MapConfig{PlayerCount: 12})
 

@@ -18,7 +18,7 @@ func TestOutboundMessageKeepsZeroTick(t *testing.T) {
 		Tick:     0,
 		TickRate: 5,
 		MapName:  "sector",
-		State: game.Snapshot{
+		State: &game.Snapshot{
 			Width:   100,
 			Height:  100,
 			Planets: []game.Planet{},

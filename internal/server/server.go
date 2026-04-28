@@ -2,8 +2,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"io/fs"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -39,13 +40,13 @@ func (server *Server) Run(ctx context.Context) error {
 		defer cancel()
 
 		if err := server.http.Shutdown(shutdownCtx); err != nil {
-			log.Printf("server shutdown failed: %v", err)
+			slog.Error("server shutdown failed", "err", err)
 		}
 	}()
 
-	log.Printf("listening on http://localhost%s", server.http.Addr)
+	slog.Info("listening", "addr", "http://localhost"+server.http.Addr)
 	err := server.http.ListenAndServe()
-	if err == http.ErrServerClosed {
+	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
 

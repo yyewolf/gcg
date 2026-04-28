@@ -1,12 +1,13 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"net/http"
-	"sort"
+	"slices"
 	"sync"
 	"time"
 
@@ -72,7 +73,7 @@ func (manager *lobbyManager) run(ctx context.Context) {
 func (manager *lobbyManager) handleWS(writer http.ResponseWriter, request *http.Request) {
 	conn, err := manager.upgrader.Upgrade(writer, request, nil)
 	if err != nil {
-		log.Printf("websocket upgrade failed: %v", err)
+		slog.Error("websocket upgrade failed", "err", err)
 		return
 	}
 
@@ -303,8 +304,8 @@ func (manager *lobbyManager) lobbySummaries() []lobbySummary {
 		lobbies = append(lobbies, lobby)
 	}
 	manager.mu.RUnlock()
-	sort.Slice(lobbies, func(i, j int) bool {
-		return lobbies[i].order < lobbies[j].order
+	slices.SortFunc(lobbies, func(a, b *lobby) int {
+		return cmp.Compare(a.order, b.order)
 	})
 
 	summaries := make([]lobbySummary, 0, len(lobbies))

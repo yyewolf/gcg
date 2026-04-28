@@ -1,0 +1,70 @@
+# .golangci.yml
+version: "2"
+run:
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Bugs & Correctness
+    - govet
+    - staticcheck
+    - errcheck
+    - errorlint
+    - bodyclose
+    - noctx
+    - durationcheck
+    - nilerr
+    - copyloopvar
+    - forcetypeassert
+    - makezero
+
+    # Security
+    - gosec
+
+    # Performance
+    - prealloc
+    - unconvert
+    - perfsprint
+
+    # Style & Maintainability
+    - ineffassign
+    - unused
+    - misspell
+    - revive
+
+    # Modernization
+    - intrange
+    - usestdlibvars
+    - modernize
+
+    # Testing Quality
+    - thelper
+    - tparallel
+
+  settings:
+    misspell:
+      locale: US
+    errcheck:
+      check-type-assertions: true
+      check-blank: false
+    gosec:
+      excludes:
+        - G404  # weak RNG is fine for non-cryptographic game logic
+        - G118  # context cancel stored in struct field and called later; shutdown goroutine intentionally uses context.Background
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+    rules:
+      - linters:
+          - tparallel
+        path: _test\.go
+        text: "TestMain"
+      - linters:
+          - intrange
+          - modernize
+          - revive
+        path: web/node_modules

@@ -245,18 +245,19 @@ func (lobby *lobby) broadcastGameStart() {
 	}
 
 	for _, client := range clients {
+		snap := engine.SnapshotForPlayer(client.playerIDValue())
 		client.sendJSON(outboundMessage{
 			Type:     "welcome",
 			Player:   client.playerIDValue(),
 			Tick:     engine.Tick(),
 			TickRate: engine.TickRate(),
 			MapName:  engine.MapName(),
-			State:    engine.SnapshotForPlayer(client.playerIDValue()),
+			State:    &snap,
 		})
 	}
 }
 
-func (lobby *lobby) broadcastState(tick int64) {
+func (lobby *lobby) broadcastState(_ int64) {
 	clients := lobby.snapshotClients()
 	engine := lobby.engineInstance()
 	if engine == nil {
@@ -316,7 +317,7 @@ func (lobby *lobby) countdownMSLocked(now time.Time) int64 {
 	if lobby.countdownEndsAt.IsZero() {
 		return 0
 	}
-	remaining := time.Until(lobby.countdownEndsAt)
+	remaining := lobby.countdownEndsAt.Sub(now)
 	if remaining < 0 {
 		return 0
 	}

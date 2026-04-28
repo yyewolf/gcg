@@ -29,6 +29,8 @@ func fleetsWithMergePadding(active map[int]*Fleet) map[int]*Fleet {
 }
 
 func TestMergeFleetsLockedCoalescesTightMatchingGroup(t *testing.T) {
+	t.Parallel()
+
 	engine := &Engine{
 		fleets: fleetsWithMergePadding(map[int]*Fleet{
 			1: {ID: 1, Owner: 1, SourceID: 10, TargetID: 20, Ships: 1, X: 100, Y: 100, VX: 80, VY: 0},
@@ -53,6 +55,8 @@ func TestMergeFleetsLockedCoalescesTightMatchingGroup(t *testing.T) {
 }
 
 func TestMergeFleetsLockedKeepsDifferentRoutesSeparate(t *testing.T) {
+	t.Parallel()
+
 	engine := &Engine{
 		fleets: fleetsWithMergePadding(map[int]*Fleet{
 			1: {ID: 1, Owner: 1, SourceID: 10, TargetID: 20, Ships: 1, X: 100, Y: 100, VX: 80, VY: 0},
@@ -69,6 +73,8 @@ func TestMergeFleetsLockedKeepsDifferentRoutesSeparate(t *testing.T) {
 }
 
 func TestMergeFleetsLockedStopsAfterSmallBundle(t *testing.T) {
+	t.Parallel()
+
 	engine := &Engine{
 		fleets: fleetsWithMergePadding(map[int]*Fleet{
 			1: {ID: 1, Owner: 1, SourceID: 10, TargetID: 20, Ships: 1, X: 100, Y: 100, VX: 80, VY: 0},
@@ -106,6 +112,8 @@ func TestMergeFleetsLockedStopsAfterSmallBundle(t *testing.T) {
 }
 
 func TestDynamicFleetMergeMaxShipsScalesWithFleetCount(t *testing.T) {
+	t.Parallel()
+
 	if mergeMaxShips := dynamicFleetMergeMaxShips(fleetMergeActivationStep - 1); mergeMaxShips != 1 {
 		t.Fatalf("expected merging to stay disabled below %d fleets, got %d", fleetMergeActivationStep, mergeMaxShips)
 	}
@@ -125,6 +133,8 @@ func TestDynamicFleetMergeMaxShipsScalesWithFleetCount(t *testing.T) {
 }
 
 func TestLaunchFleetBundleSizeWaitsForMergeThreshold(t *testing.T) {
+	t.Parallel()
+
 	if bundleSize := launchFleetBundleSize(0, fleetMergeActivationStep-1); bundleSize != 1 {
 		t.Fatalf("expected launch bundling to stay disabled below %d fleets, got %d", fleetMergeActivationStep, bundleSize)
 	}

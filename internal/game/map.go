@@ -92,7 +92,7 @@ func addHomePlanets(planets map[int]*Planet, width, height float64, playerCount 
 	startAngle := -math.Pi * 0.5
 	nextID := 1
 
-	for playerIndex := 0; playerIndex < playerCount; playerIndex++ {
+	for playerIndex := range playerCount {
 		angle := startAngle + 2*math.Pi*float64(playerIndex)/float64(playerCount)
 		planets[nextID] = &Planet{
 			ID:     nextID,
@@ -122,9 +122,9 @@ func addLocalNeutralPlanets(planets map[int]*Planet, nextID int, width, height f
 		inwardX, inwardY := normalizeVector(centerX-home.X, centerY-home.Y)
 		tangentX, tangentY := -inwardY, inwardX
 
-		for laneIndex := 0; laneIndex < localNeutralCountPerHome; laneIndex++ {
+		for laneIndex := range localNeutralCountPerHome {
 			placed := false
-			for attempt := 0; attempt < mapGenerationAttempts; attempt++ {
+			for range mapGenerationAttempts {
 				radius := randomNeutralRadius(rng)
 				distance := 250 + float64(laneIndex)*170 + randomRange(rng, -45, 45)
 				tangentOffset := randomRange(rng, -85, 85)
@@ -134,7 +134,7 @@ func addLocalNeutralPlanets(planets map[int]*Planet, nextID int, width, height f
 					continue
 				}
 
-				ships, growth := neutralStats(radius)
+				ships, growth := neutralStats(rng, radius)
 				planets[nextID] = &Planet{ID: nextID, X: x, Y: y, Radius: radius, Ships: ships, Growth: growth}
 				nextID++
 				placed = true
@@ -156,8 +156,8 @@ func addCenterClusterPlanets(planets map[int]*Planet, nextID int, width, height 
 	centerRadiusX := width * 0.18
 	centerRadiusY := height * 0.18
 
-	for clusterIndex := 0; clusterIndex < centerClusterCount; clusterIndex++ {
-		for attempt := 0; attempt < mapGenerationAttempts; attempt++ {
+	for range centerClusterCount {
+		for range mapGenerationAttempts {
 			radius := randomNeutralRadius(rng)
 			angle := randomRange(rng, 0, 2*math.Pi)
 			distanceScale := math.Sqrt(rng.Float64())
@@ -167,7 +167,7 @@ func addCenterClusterPlanets(planets map[int]*Planet, nextID int, width, height 
 				continue
 			}
 
-			ships, growth := neutralStats(radius)
+			ships, growth := neutralStats(rng, radius)
 			planets[nextID] = &Planet{ID: nextID, X: x, Y: y, Radius: radius, Ships: ships, Growth: growth}
 			nextID++
 			break
@@ -178,8 +178,8 @@ func addCenterClusterPlanets(planets map[int]*Planet, nextID int, width, height 
 }
 
 func addRoamingNeutralPlanets(planets map[int]*Planet, nextID int, width, height float64, rng *rand.Rand) {
-	for roamingIndex := 0; roamingIndex < roamingNeutralCount; roamingIndex++ {
-		for attempt := 0; attempt < mapGenerationAttempts; attempt++ {
+	for range roamingNeutralCount {
+		for range mapGenerationAttempts {
 			radius := randomNeutralRadius(rng)
 			x := randomRange(rng, mapEdgePadding+radius, width-mapEdgePadding-radius)
 			y := randomRange(rng, mapEdgePadding+radius, height-mapEdgePadding-radius)
@@ -187,7 +187,7 @@ func addRoamingNeutralPlanets(planets map[int]*Planet, nextID int, width, height
 				continue
 			}
 
-			ships, growth := neutralStats(radius)
+			ships, growth := neutralStats(rng, radius)
 			planets[nextID] = &Planet{ID: nextID, X: x, Y: y, Radius: radius, Ships: ships, Growth: growth}
 			nextID++
 			break
@@ -199,7 +199,7 @@ func randomNeutralRadius(rng *rand.Rand) float64 {
 	return neutralPlanetMinRadius + rng.Float64()*(neutralPlanetMaxRadius-neutralPlanetMinRadius)
 }
 
-func neutralStats(radius float64) (int, int) {
+func neutralStats(rng *rand.Rand, radius float64) (int, int) {
 	growth := 1
 	if radius >= 27 {
 		growth = 2
@@ -208,10 +208,8 @@ func neutralStats(radius float64) (int, int) {
 		growth = 3
 	}
 
-	ships := rand.Intn(int(math.Round(radius*0.75))) + int(math.Round(radius*0.25))
-	if ships < 7 {
-		ships = 7
-	}
+	ships := rng.Intn(int(math.Round(radius*0.75))) + int(math.Round(radius*0.25))
+	ships = max(ships, 7)
 
 	return ships, growth
 }

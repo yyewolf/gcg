@@ -2,7 +2,7 @@ package game
 
 import (
 	"math"
-	"sort"
+	"slices"
 	"sync"
 )
 
@@ -68,7 +68,7 @@ func NewEngineWithConfig(config MapConfig) *Engine {
 
 func resolvePlayerColors(playerCount int) []PlayerColor {
 	colors := make([]PlayerColor, 0, playerCount)
-	for playerIndex := 0; playerIndex < playerCount; playerIndex++ {
+	for playerIndex := range playerCount {
 		colors = append(colors, PlayerColor{
 			PlayerID: playerIndex + 1,
 			Color:    playerColorPalette[playerIndex%len(playerColorPalette)],
@@ -196,9 +196,7 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 
 	travelSeconds, vx, vy := engine.travelVector(source, target)
 	travelTicks := int64(math.Ceil(travelSeconds * float64(engine.tickRate)))
-	if travelTicks < 1 {
-		travelTicks = 1
-	}
+	travelTicks = max(travelTicks, 1)
 
 	launchDirectionX, launchDirectionY := normalizeVector(target.X-source.X, target.Y-source.Y)
 	launchOffset := source.Radius + fleetCollisionRadius + collisionPadding
@@ -232,10 +230,7 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 			spawnX := source.X + math.Cos(spawnAngle)*ringRadius
 			spawnY := source.Y + math.Sin(spawnAngle)*ringRadius
 			bundleShips := remainingShips
-			if bundleShips > launchBundleSize {
-				bundleShips = launchBundleSize
-			}
-
+			bundleShips = min(bundleShips, launchBundleSize)
 			fleet := &Fleet{
 				ID:         engine.nextFleetID,
 				Owner:      playerID,
@@ -292,7 +287,7 @@ func (engine *Engine) moveFleetsLocked() {
 	for id := range engine.fleets {
 		fleetIDs = append(fleetIDs, id)
 	}
-	sort.Ints(fleetIDs)
+	slices.Sort(fleetIDs)
 	steeringIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance+fleetInfluencePadding)
 	planetIndex := engine.planetIndex
 	if planetIndex == nil {
@@ -362,7 +357,7 @@ func (engine *Engine) snapshotForPlayerLocked(playerID int) Snapshot {
 	for id := range engine.planets {
 		planetIDs = append(planetIDs, id)
 	}
-	sort.Ints(planetIDs)
+	slices.Sort(planetIDs)
 
 	planets := make([]Planet, 0, len(planetIDs))
 	for _, id := range planetIDs {
@@ -380,7 +375,7 @@ func (engine *Engine) snapshotForPlayerLocked(playerID int) Snapshot {
 	for id := range engine.fleets {
 		fleetIDs = append(fleetIDs, id)
 	}
-	sort.Ints(fleetIDs)
+	slices.Sort(fleetIDs)
 
 	fleets := make([]Fleet, 0, len(fleetIDs))
 	for _, id := range fleetIDs {

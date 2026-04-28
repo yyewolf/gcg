@@ -605,13 +605,13 @@ func clamp01(value float64) float64 {
 	return value
 }
 
-func clampMagnitude(x, y, max float64) (float64, float64) {
+func clampMagnitude(x, y, maxMag float64) (float64, float64) {
 	length := math.Hypot(x, y)
-	if length == 0 || length <= max {
+	if length == 0 || length <= maxMag {
 		return x, y
 	}
 
-	scale := max / length
+	scale := maxMag / length
 	return x * scale, y * scale
 }
 

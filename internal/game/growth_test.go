@@ -3,6 +3,8 @@ package game
 import "testing"
 
 func TestGrowPlanetsLockedUsesSlowerInterval(t *testing.T) {
+	t.Parallel()
+
 	engine := &Engine{
 		tickRate: DefaultIdleTickRate,
 		planets: map[int]*Planet{

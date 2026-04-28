@@ -3,6 +3,8 @@ package game
 import "testing"
 
 func TestResolveDynamicTickRateLockedDefaultsToIdle(t *testing.T) {
+	t.Parallel()
+
 	engine := &Engine{tickRate: DefaultIdleTickRate, planets: map[int]*Planet{}}
 
 	if tickRate := engine.resolveDynamicTickRateLocked(); tickRate != DefaultIdleTickRate {
@@ -11,6 +13,8 @@ func TestResolveDynamicTickRateLockedDefaultsToIdle(t *testing.T) {
 }
 
 func TestResolveDynamicTickRateLockedRaisesNearArrival(t *testing.T) {
+	t.Parallel()
+
 	engine := &Engine{
 		tickRate:   DefaultIdleTickRate,
 		fleetSpeed: defaultFleetSpeedUPS,

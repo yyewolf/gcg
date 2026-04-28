@@ -30,7 +30,7 @@ type outboundMessage struct {
 	Tick          int64          `json:"tick"`
 	TickRate      int            `json:"tickRate,omitempty"`
 	MapName       string         `json:"map,omitempty"`
-	State         game.Snapshot  `json:"state,omitempty"`
+	State         *game.Snapshot `json:"state,omitempty"`
 	Error         string         `json:"error,omitempty"`
 }
 
