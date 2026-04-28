@@ -63,7 +63,6 @@ func (client *client) readLoop() {
 			}
 
 			lobby.nudge()
-			lobby.broadcastState(engine.Tick())
 		default:
 			client.sendJSON(outboundMessage{Type: "error", Error: "unknown command"})
 		}

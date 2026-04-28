@@ -6,6 +6,8 @@ const maxTrailPoints = 24;
 const minTrailPointDistance = 4;
 const shipLength = 9;
 const shipHalfWidth = 4.8;
+// How long (ms) to blend out a position correction after a server snapshot arrives.
+const correctionDurationMS = 150;
 
 interface TrailPoint {
   x: number;
@@ -20,6 +22,12 @@ export class FleetView extends Container {
   private fleet: FleetSnapshot | null = null;
   private color = 0xffffff;
   private showDebugTrail: boolean;
+  // Smooth correction: when a new server snapshot arrives, instead of
+  // hard-teleporting, we record the gap between the predicted position and
+  // the server position and decay it over correctionDurationMS.
+  private correctionErrorX = 0;
+  private correctionErrorY = 0;
+  private correctionT = 1;
 
   constructor(showDebugTrail: boolean) {
     super();
@@ -48,9 +56,20 @@ export class FleetView extends Container {
   }
 
   public sync(fleet: FleetSnapshot, color: number): void {
+    if (this.fleet !== null) {
+      // Record the gap between where we're currently showing the fleet and
+      // where the server says it is. predict() decays this error so there's
+      // no hard visual jump on state arrival.
+      this.correctionErrorX = this.position.x - fleet.x;
+      this.correctionErrorY = this.position.y - fleet.y;
+      this.correctionT = 0;
+    } else {
+      // First appearance: place the fleet directly at its server position
+      // so it doesn't flash at the origin before predict() runs.
+      this.position.set(fleet.x, fleet.y);
+    }
     this.fleet = fleet;
     this.color = color;
-    this.position.set(fleet.x, fleet.y);
 
     if (this.showDebugTrail) {
       this.pushTrailPoint(fleet.x, fleet.y);
@@ -64,16 +83,29 @@ export class FleetView extends Container {
     this.drawShips(fleet, this.color);
   }
 
-  public predict(elapsedMS: number): void {
+  public predict(elapsedSinceSyncMS: number, correctionDeltaMS: number): void {
     if (this.fleet === null) {
       return;
     }
 
-    const deltaSeconds = elapsedMS / 1000;
-    this.position.set(
-      this.fleet.x + this.fleet.vx * deltaSeconds,
-      this.fleet.y + this.fleet.vy * deltaSeconds,
+    const deltaSeconds = elapsedSinceSyncMS / 1000;
+    this.correctionT = Math.min(
+      1,
+      this.correctionT + correctionDeltaMS / correctionDurationMS,
     );
+    // Position = server-authoritative forward prediction + decaying correction
+    // that smooths out any gap between where we predicted the fleet and where
+    // the server actually placed it.
+    const correctionFactor = 1 - this.correctionT;
+    const x =
+      this.fleet.x +
+      this.fleet.vx * deltaSeconds +
+      this.correctionErrorX * correctionFactor;
+    const y =
+      this.fleet.y +
+      this.fleet.vy * deltaSeconds +
+      this.correctionErrorY * correctionFactor;
+    this.position.set(x, y);
 
     if (this.showDebugTrail) {
       this.drawTrail(this.fleet, this.color);

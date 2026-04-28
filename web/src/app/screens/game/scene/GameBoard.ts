@@ -38,7 +38,10 @@ const minCameraZoom = 1;
 const maxCameraZoom = 3.5;
 const zoomStep = 1.15;
 const panDragThreshold = 8;
-const predictionLeadTicks = 1.35;
+// Max number of ticks to extrapolate fleet positions under lag.
+// Higher values keep fleets visually moving through packet loss but increase
+// drift from actual physics (steering/avoidance).
+const maxPredictionTicks = 5.0;
 const spawnCameraZoom = 2.1;
 
 function buildStarField(width: number, height: number): Star[] {
@@ -78,8 +81,10 @@ export class GameBoard extends Container {
   private readonly selectedSourceIDs = new Set<number>();
   private shouldAutoFocusPlayer = true;
   private showDebugFleetTrails = initialShowDebugFleetTrails;
-  private fleetPredictionMS = 0;
-  private fleetPredictionLimitMS = 100;
+  // Wall-clock time of the last server snapshot, used to compute how far
+  // ahead to extrapolate fleet positions each frame.
+  private lastSyncPerformanceMS = 0;
+  private tickIntervalMS = 1000 / 15;
   private activePointerButton: number | null = null;
   private panActive = false;
   private selectionBoxActive = false;
@@ -145,7 +150,7 @@ export class GameBoard extends Container {
       this.syncFleets([]);
       this.previousFleets.clear();
       this.previousPlanets.clear();
-      this.fleetPredictionMS = 0;
+      this.lastSyncPerformanceMS = 0;
       this.clearSelectionBox();
       this.drawPreviewPaths();
       return;
@@ -153,11 +158,8 @@ export class GameBoard extends Container {
 
     this.syncWorldBounds(snapshot.width, snapshot.height);
     this.syncPlayerColors(snapshot.playerColors);
-    this.fleetPredictionMS = 0;
-    this.fleetPredictionLimitMS = Math.max(
-      50,
-      (1000 / Math.max(1, snapshot.tickRate)) * predictionLeadTicks,
-    );
+    this.lastSyncPerformanceMS = performance.now();
+    this.tickIntervalMS = 1000 / Math.max(1, snapshot.tickRate);
 
     this.syncPlanets(snapshot.planets, playerID, selectedSourceIDs);
     this.syncAutoFocus(snapshot.planets, playerID);
@@ -177,9 +179,16 @@ export class GameBoard extends Container {
   }
 
   public update(deltaMS: number): void {
-    this.fleetPredictionMS = Math.min(
-      this.fleetPredictionMS + deltaMS,
-      this.fleetPredictionLimitMS,
+    // Compute how far to extrapolate fleet positions this frame. Using the
+    // wall clock (instead of a per-frame accumulator) means fleets keep
+    // moving through lag spikes; the cap prevents extreme drift.
+    const elapsedSinceSyncMS =
+      this.lastSyncPerformanceMS > 0
+        ? performance.now() - this.lastSyncPerformanceMS
+        : 0;
+    const cappedElapsedMS = Math.min(
+      elapsedSinceSyncMS,
+      this.tickIntervalMS * maxPredictionTicks,
     );
 
     for (const planetView of this.planetViews.values()) {
@@ -187,7 +196,7 @@ export class GameBoard extends Container {
     }
 
     for (const fleetView of this.fleetViews.values()) {
-      fleetView.predict(this.fleetPredictionMS);
+      fleetView.predict(cappedElapsedMS, deltaMS);
     }
   }
 
