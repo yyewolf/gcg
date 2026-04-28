@@ -18,9 +18,9 @@ const (
 	fleetSeparationDistance  = 8.0
 )
 
-func (engine *Engine) advanceFleetLocked(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) {
+func (engine *Engine) advanceFleet(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) {
 	deltaTime := 1 / float64(engine.tickRate)
-	desiredX, desiredY := engine.computeFleetAccelerationLocked(fleet, target, steeringIndex, planetIndex)
+	desiredX, desiredY := engine.computeFleetAcceleration(fleet, target, steeringIndex, planetIndex)
 	desiredX, desiredY = normalizeVector(desiredX, desiredY)
 	if desiredX == 0 && desiredY == 0 {
 		desiredX, desiredY = normalizeVector(target.X-fleet.X, target.Y-fleet.Y)
@@ -44,21 +44,21 @@ func (engine *Engine) advanceFleetLocked(id int, fleet *Fleet, target *Planet, s
 	nextX := fleet.X + fleet.VX*deltaTime
 	nextY := fleet.Y + fleet.VY*deltaTime
 	if segmentIntersectsCircle(fleet.X, fleet.Y, nextX, nextY, target, fleetCollisionRadius) {
-		engine.resolveArrivalLocked(id, fleet, target)
+		engine.resolveArrival(id, fleet, target)
 		return
 	}
 
 	fleet.X = nextX
 	fleet.Y = nextY
-	engine.resolvePlanetCollisionsLocked(fleet, target, planetIndex)
+	engine.resolvePlanetCollisions(fleet, target, planetIndex)
 	fleet.VX, fleet.VY = clampMagnitude(fleet.VX, fleet.VY, engine.fleetSpeed)
 }
 
-func (engine *Engine) computeFleetAccelerationLocked(fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) (float64, float64) {
+func (engine *Engine) computeFleetAcceleration(fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) (float64, float64) {
 	targetX, targetY := normalizeVector(target.X-fleet.X, target.Y-fleet.Y)
 	accelerationX := targetX * targetPullAcceleration
 	accelerationY := targetY * targetPullAcceleration
-	blocking := engine.currentAvoidancePlanetLocked(fleet, target, planetIndex)
+	blocking := engine.currentAvoidancePlanet(fleet, target, planetIndex)
 	visitPlanet := func(planet *Planet) {
 		if planet == nil {
 			return
@@ -117,7 +117,7 @@ func (engine *Engine) computeFleetAccelerationLocked(fleet *Fleet, target *Plane
 	return accelerationX, accelerationY
 }
 
-func (engine *Engine) resolvePlanetCollisionsLocked(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) {
+func (engine *Engine) resolvePlanetCollisions(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) {
 	visitPlanet := func(planet *Planet) {
 		if planet == nil {
 			return
@@ -159,7 +159,7 @@ func (engine *Engine) resolvePlanetCollisionsLocked(fleet *Fleet, target *Planet
 	}
 }
 
-func (engine *Engine) resolveFleetCollisionsLocked(collisionIndex *fleetSpatialIndex) {
+func (engine *Engine) resolveFleetCollisions(collisionIndex *fleetSpatialIndex) {
 	if len(engine.fleets) < 2 || collisionIndex == nil {
 		return
 	}
@@ -209,7 +209,7 @@ func (engine *Engine) resolveFleetCollisionsLocked(collisionIndex *fleetSpatialI
 	}
 }
 
-func (engine *Engine) resolveArrivalLocked(id int, fleet *Fleet, target *Planet) {
+func (engine *Engine) resolveArrival(id int, fleet *Fleet, target *Planet) {
 	fleet.X = target.X
 	fleet.Y = target.Y
 

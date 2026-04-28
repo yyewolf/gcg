@@ -28,7 +28,7 @@ func fleetsWithMergePadding(active map[int]*Fleet) map[int]*Fleet {
 	return padded
 }
 
-func TestMergeFleetsLockedCoalescesTightMatchingGroup(t *testing.T) {
+func TestMergeFleetsCoalescesTightMatchingGroup(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{
@@ -39,7 +39,7 @@ func TestMergeFleetsLockedCoalescesTightMatchingGroup(t *testing.T) {
 	}
 
 	mergeIndex := newFleetSpatialIndex(engine.fleets, fleetMergeDistance)
-	engine.mergeFleetsLocked(mergeIndex)
+	engine.mergeFleets(mergeIndex)
 
 	if len(engine.fleets) != fleetMergeActivationStep-1 {
 		t.Fatalf("expected fleets to merge into one backend fleet, got %d", len(engine.fleets))
@@ -54,7 +54,7 @@ func TestMergeFleetsLockedCoalescesTightMatchingGroup(t *testing.T) {
 	}
 }
 
-func TestMergeFleetsLockedKeepsDifferentRoutesSeparate(t *testing.T) {
+func TestMergeFleetsKeepsDifferentRoutesSeparate(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{
@@ -65,14 +65,14 @@ func TestMergeFleetsLockedKeepsDifferentRoutesSeparate(t *testing.T) {
 	}
 
 	mergeIndex := newFleetSpatialIndex(engine.fleets, fleetMergeDistance)
-	engine.mergeFleetsLocked(mergeIndex)
+	engine.mergeFleets(mergeIndex)
 
 	if len(engine.fleets) != fleetMergeActivationStep {
 		t.Fatalf("expected fleets with different targets to stay separate, got %d", len(engine.fleets))
 	}
 }
 
-func TestMergeFleetsLockedStopsAfterSmallBundle(t *testing.T) {
+func TestMergeFleetsStopsAfterSmallBundle(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{
@@ -84,7 +84,7 @@ func TestMergeFleetsLockedStopsAfterSmallBundle(t *testing.T) {
 	}
 
 	mergeIndex := newFleetSpatialIndex(engine.fleets, fleetMergeDistance)
-	engine.mergeFleetsLocked(mergeIndex)
+	engine.mergeFleets(mergeIndex)
 
 	if len(engine.fleets) != fleetMergeActivationStep-1 {
 		t.Fatalf("expected one small merge but not full collapse, got %d fleets", len(engine.fleets))

@@ -104,25 +104,25 @@ func (engine *Engine) Advance() Snapshot {
 	defer engine.mu.Unlock()
 
 	engine.tick++
-	engine.moveFleetsLocked()
-	engine.growPlanetsLocked()
-	engine.tickRate = engine.resolveDynamicTickRateLocked()
+	engine.moveFleets()
+	engine.growPlanets()
+	engine.tickRate = engine.resolveDynamicTickRate()
 
-	return engine.snapshotLocked()
+	return engine.buildSnapshot()
 }
 
 func (engine *Engine) Snapshot() Snapshot {
 	engine.mu.RLock()
 	defer engine.mu.RUnlock()
 
-	return engine.snapshotLocked()
+	return engine.buildSnapshot()
 }
 
 func (engine *Engine) SnapshotForPlayer(playerID int) Snapshot {
 	engine.mu.RLock()
 	defer engine.mu.RUnlock()
 
-	return engine.snapshotForPlayerLocked(playerID)
+	return engine.buildSnapshotForPlayer(playerID)
 }
 
 func (engine *Engine) Winner() (int, bool) {
@@ -261,7 +261,7 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 		}
 	}
 
-	engine.tickRate = engine.resolveDynamicTickRateLocked()
+	engine.tickRate = engine.resolveDynamicTickRate()
 
 	return firstFleet, nil
 }
@@ -288,7 +288,7 @@ func maxShipsOnLaunchRing(radius float64) int {
 	return capacity
 }
 
-func (engine *Engine) moveFleetsLocked() {
+func (engine *Engine) moveFleets() {
 	fleetIDs := make([]int, 0, len(engine.fleets))
 	for id := range engine.fleets {
 		fleetIDs = append(fleetIDs, id)
@@ -312,15 +312,15 @@ func (engine *Engine) moveFleetsLocked() {
 			continue
 		}
 
-		engine.advanceFleetLocked(id, fleet, target, steeringIndex, planetIndex)
+		engine.advanceFleet(id, fleet, target, steeringIndex, planetIndex)
 	}
 
 	collisionIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance)
-	engine.resolveFleetCollisionsLocked(collisionIndex)
-	engine.mergeFleetsLocked(collisionIndex)
+	engine.resolveFleetCollisions(collisionIndex)
+	engine.mergeFleets(collisionIndex)
 }
 
-func (engine *Engine) growPlanetsLocked() {
+func (engine *Engine) growPlanets() {
 	if engine.tickRate < 1 {
 		return
 	}
@@ -354,11 +354,11 @@ func (engine *Engine) travelVector(source, target *Planet) (float64, float64, fl
 	return travelSeconds, dx / travelSeconds, dy / travelSeconds
 }
 
-func (engine *Engine) snapshotLocked() Snapshot {
-	return engine.snapshotForPlayerLocked(0)
+func (engine *Engine) buildSnapshot() Snapshot {
+	return engine.buildSnapshotForPlayer(0)
 }
 
-func (engine *Engine) snapshotForPlayerLocked(playerID int) Snapshot {
+func (engine *Engine) buildSnapshotForPlayer(playerID int) Snapshot {
 	planetIDs := make([]int, 0, len(engine.planets))
 	for id := range engine.planets {
 		planetIDs = append(planetIDs, id)

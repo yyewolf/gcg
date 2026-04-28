@@ -2,12 +2,11 @@ package game
 
 import "math"
 
-// resolveDynamicTickRateLocked raises the simulation tick rate from idle to
-// full whenever any fleet is close enough to its target or a planet obstacle
-// that a coarse time step could cause it to tunnel through a collision
-// boundary. This keeps the simulation cheap during calm moments while
-// preserving accuracy near collisions.
-func (engine *Engine) resolveDynamicTickRateLocked() int {
+// resolveDynamicTickRate raises the tick rate from idle to full whenever a
+// fleet is close enough to its target or a planet that a coarse time step
+// could tunnel through a collision boundary. Keeps the simulation cheap
+// during calm moments while preserving accuracy near collisions.
+func (engine *Engine) resolveDynamicTickRate() int {
 	if len(engine.fleets) == 0 {
 		return DefaultIdleTickRate
 	}

@@ -2,7 +2,7 @@ package game
 
 import "testing"
 
-func TestGrowPlanetsLockedUsesSlowerInterval(t *testing.T) {
+func TestGrowPlanetsUsesSlowerInterval(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{
@@ -13,7 +13,7 @@ func TestGrowPlanetsLockedUsesSlowerInterval(t *testing.T) {
 	}
 
 	for range DefaultIdleTickRate {
-		engine.growPlanetsLocked()
+		engine.growPlanets()
 	}
 	if ships := engine.planets[1].Ships; ships != 10 {
 		t.Fatalf("expected no growth after 1 second, got %d ships", ships)
@@ -21,7 +21,7 @@ func TestGrowPlanetsLockedUsesSlowerInterval(t *testing.T) {
 
 	engine.tickRate = DefaultTickRate
 	for range DefaultTickRate {
-		engine.growPlanetsLocked()
+		engine.growPlanets()
 	}
 	if ships := engine.planets[1].Ships; ships != 13 {
 		t.Fatalf("expected growth after slower interval, got %d ships", ships)

@@ -15,7 +15,7 @@ const (
 	fleetMergeScaleStep      = 600
 )
 
-func (engine *Engine) mergeFleetsLocked(mergeIndex *fleetSpatialIndex) {
+func (engine *Engine) mergeFleets(mergeIndex *fleetSpatialIndex) {
 	if len(engine.fleets) < 2 || mergeIndex == nil {
 		return
 	}

@@ -10,7 +10,7 @@ const avoidanceSwitchMargin = 12.0
 
 // avoidanceRoute holds the estimated path length around a planet obstacle.
 type avoidanceRoute struct {
-totalLength float64
+	totalLength float64
 }
 
 // avoidanceRadius returns the minimum clearance distance a fleet must maintain
@@ -19,27 +19,27 @@ func avoidanceRadius(planet *Planet) float64 {
 	return planet.Radius + fleetCollisionRadius + collisionPadding
 }
 
-// currentAvoidancePlanetLocked returns the planet the fleet is currently
-// routing around, or nil if the direct path is clear. It refreshes the
-// avoidance target whenever the old one is no longer blocking.
-func (engine *Engine) currentAvoidancePlanetLocked(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) *Planet {
-	if current := engine.planets[fleet.AvoidPlanetID]; current != nil && engine.shouldKeepAvoidingPlanetLocked(fleet, target, current) {
+// currentAvoidancePlanet returns the planet the fleet is currently routing
+// around, or nil if the direct path is clear. It refreshes the avoidance
+// target whenever the old one is no longer blocking.
+func (engine *Engine) currentAvoidancePlanet(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) *Planet {
+	if current := engine.planets[fleet.AvoidPlanetID]; current != nil && engine.shouldKeepAvoidingPlanet(fleet, target, current) {
 		return current
 	}
 
-	blocking := engine.findBlockingPlanetLocked(fleet, target, planetIndex)
+	blocking := engine.findBlockingPlanet(fleet, target, planetIndex)
 	if blocking == nil {
 		fleet.AvoidPlanetID = 0
 		fleet.AvoidClockwise = false
 		return nil
 	}
 
-	fleet.AvoidClockwise = engine.chooseAvoidanceClockwiseLocked(fleet, blocking, target)
+	fleet.AvoidClockwise = engine.chooseAvoidanceClockwise(fleet, blocking, target)
 	fleet.AvoidPlanetID = blocking.ID
 	return blocking
 }
 
-func (engine *Engine) shouldKeepAvoidingPlanetLocked(fleet *Fleet, target *Planet, obstacle *Planet) bool {
+func (engine *Engine) shouldKeepAvoidingPlanet(fleet *Fleet, target *Planet, obstacle *Planet) bool {
 	if segmentIntersectsCircle(fleet.X, fleet.Y, target.X, target.Y, obstacle, fleetCollisionRadius+avoidancePadding) {
 		return true
 	}
@@ -47,9 +47,9 @@ func (engine *Engine) shouldKeepAvoidingPlanetLocked(fleet *Fleet, target *Plane
 	return math.Hypot(fleet.X-obstacle.X, fleet.Y-obstacle.Y) < avoidanceRadius(obstacle)+planetInfluencePadding
 }
 
-// findBlockingPlanetLocked returns the nearest planet that intersects the
-// direct line from the fleet to its target, or nil if the path is clear.
-func (engine *Engine) findBlockingPlanetLocked(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) *Planet {
+// findBlockingPlanet returns the nearest planet that intersects the direct
+// line from the fleet to its target, or nil if the path is clear.
+func (engine *Engine) findBlockingPlanet(fleet *Fleet, target *Planet, planetIndex *planetSpatialIndex) *Planet {
 	var blocking *Planet
 	bestDistance := math.MaxFloat64
 	visitPlanet := func(planet *Planet) {
@@ -90,10 +90,10 @@ func (engine *Engine) findBlockingPlanetLocked(fleet *Fleet, target *Planet, pla
 	return blocking
 }
 
-// chooseAvoidanceClockwiseLocked picks the shorter tangent arc around the
+// chooseAvoidanceClockwise picks the shorter tangent arc around the
 // obstacle. If the fleet is already committed to one side, it stays on that
 // side unless the other is shorter by more than avoidanceSwitchMargin.
-func (engine *Engine) chooseAvoidanceClockwiseLocked(fleet *Fleet, obstacle, target *Planet) bool {
+func (engine *Engine) chooseAvoidanceClockwise(fleet *Fleet, obstacle, target *Planet) bool {
 	clockwiseRoute, clockwiseOK := buildAvoidanceRoute(fleet.X, fleet.Y, obstacle, target.X, target.Y, true)
 	counterRoute, counterOK := buildAvoidanceRoute(fleet.X, fleet.Y, obstacle, target.X, target.Y, false)
 	if !clockwiseOK {

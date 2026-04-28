@@ -2,17 +2,17 @@ package game
 
 import "testing"
 
-func TestResolveDynamicTickRateLockedDefaultsToIdle(t *testing.T) {
+func TestResolveDynamicTickRateDefaultsToIdle(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{tickRate: DefaultIdleTickRate, planets: map[int]*Planet{}}
 
-	if tickRate := engine.resolveDynamicTickRateLocked(); tickRate != DefaultIdleTickRate {
+	if tickRate := engine.resolveDynamicTickRate(); tickRate != DefaultIdleTickRate {
 		t.Fatalf("expected idle tickrate %d, got %d", DefaultIdleTickRate, tickRate)
 	}
 }
 
-func TestResolveDynamicTickRateLockedRaisesNearArrival(t *testing.T) {
+func TestResolveDynamicTickRateRaisesNearArrival(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{
@@ -28,7 +28,7 @@ func TestResolveDynamicTickRateLockedRaisesNearArrival(t *testing.T) {
 	}
 	engine.planetIndex = newPlanetSpatialIndex(engine.planets)
 
-	if tickRate := engine.resolveDynamicTickRateLocked(); tickRate != DefaultTickRate {
+	if tickRate := engine.resolveDynamicTickRate(); tickRate != DefaultTickRate {
 		t.Fatalf("expected high tickrate %d near arrival, got %d", DefaultTickRate, tickRate)
 	}
 }
