@@ -39,6 +39,7 @@ func (engine *Engine) mergeFleets(mergeIndex *fleetSpatialIndex) {
 			}
 
 			mergeFleet(first, second)
+			engine.removeSortedFleetID(second.ID)
 			delete(engine.fleets, second.ID)
 		})
 	}

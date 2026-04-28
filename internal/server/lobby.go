@@ -30,6 +30,8 @@ type lobby struct {
 	engine          *game.Engine
 	countdownEndsAt time.Time
 	emptySince      time.Time
+	poke            chan struct{}
+	lastTick        time.Time
 }
 
 func newLobby(manager *lobbyManager, id string, order int, cancel context.CancelFunc) *lobby {
@@ -40,13 +42,22 @@ func newLobby(manager *lobbyManager, id string, order int, cancel context.Cancel
 		cancel:     cancel,
 		clients:    make(map[*client]struct{}),
 		emptySince: time.Now(),
+		poke:       make(chan struct{}, 1),
 	}
 }
 
 func (lobby *lobby) run(ctx context.Context) {
+	next := time.Now()
 	for {
 		interval := lobby.nextInterval()
-		timer := time.NewTimer(interval)
+		next = next.Add(interval)
+		delay := time.Until(next)
+		if delay < 0 {
+			// Step is running behind; reset deadline to avoid spiral catch-up.
+			next = time.Now()
+			delay = 0
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -56,9 +67,40 @@ func (lobby *lobby) run(ctx context.Context) {
 				}
 			}
 			return
+		case <-lobby.poke:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			// Reset the deadline so the next interval starts from now,
+			// not from the interrupted idle window.
+			next = time.Now()
+			lobby.step()
 		case <-timer.C:
 			lobby.step()
 		}
+	}
+}
+
+// nudge wakes the run loop immediately if it is sleeping on an idle timer.
+// Only fires if the last tick was more than one full-rate interval ago to
+// avoid injecting extra ticks when the simulation is already running at pace.
+// A buffered channel of size 1 ensures multiple rapid fleet sends collapse
+// into a single early tick rather than queuing.
+func (lobby *lobby) nudge() {
+	lobby.mu.RLock()
+	sinceLastTick := time.Since(lobby.lastTick)
+	lobby.mu.RUnlock()
+
+	if sinceLastTick < time.Second/game.DefaultTickRate {
+		return
+	}
+
+	select {
+	case lobby.poke <- struct{}{}:
+	default:
 	}
 }
 
@@ -66,8 +108,15 @@ func (lobby *lobby) step() {
 	lobby.mu.Lock()
 	engine := lobby.engine
 	if engine != nil {
-		state := engine.Advance()
-		winnerID, hasWinner := engine.Winner()
+		now := time.Now()
+		var deltaSeconds float64
+		if lobby.lastTick.IsZero() {
+			deltaSeconds = 1 / float64(game.DefaultTickRate)
+		} else {
+			deltaSeconds = now.Sub(lobby.lastTick).Seconds()
+		}
+		lobby.lastTick = now
+		state, winnerID, hasWinner := engine.Advance(deltaSeconds)
 		lobby.mu.Unlock()
 		lobby.broadcastState(state.Tick)
 		if hasWinner {

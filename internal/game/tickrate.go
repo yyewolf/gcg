@@ -6,7 +6,9 @@ import "math"
 // fleet is close enough to its target or a planet that a coarse time step
 // could tunnel through a collision boundary. Keeps the simulation cheap
 // during calm moments while preserving accuracy near collisions.
-func (engine *Engine) resolveDynamicTickRate() int {
+// fleetIndex is the collision index already built by moveFleets; passing it
+// in avoids a third O(N) index construction per tick.
+func (engine *Engine) resolveDynamicTickRate(fleetIndex *fleetSpatialIndex) int {
 	if len(engine.fleets) == 0 {
 		return DefaultIdleTickRate
 	}
@@ -19,7 +21,6 @@ func (engine *Engine) resolveDynamicTickRate() int {
 
 	slowStepSeconds := 1 / float64(DefaultIdleTickRate)
 	riskDistance := engine.fleetSpeed * slowStepSeconds
-	fleetIndex := newFleetSpatialIndex(engine.fleets, riskDistance+fleetSeparationDistance)
 
 	for _, fleet := range engine.fleets {
 		if fleet == nil {

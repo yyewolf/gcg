@@ -116,7 +116,7 @@ func TestFleetSlidesAroundIntermediatePlanet(t *testing.T) {
 	minimumClearance := avoidanceRadius(engine.planets[3]) - 0.001
 
 	for range 180 {
-		engine.Advance()
+		engine.Advance(1 / float64(DefaultTickRate))
 
 		activeFleet, ok := engine.fleets[fleet.ID]
 		if !ok {
@@ -184,7 +184,7 @@ func TestFleetChoosesShortestSideAroundOffsetPlanet(t *testing.T) {
 			arrived := false
 
 			for range 180 {
-				engine.Advance()
+				engine.Advance(1 / float64(DefaultTickRate))
 
 				activeFleet, ok := engine.fleets[fleet.ID]
 				if !ok {

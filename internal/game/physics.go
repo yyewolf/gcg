@@ -18,8 +18,7 @@ const (
 	fleetSeparationDistance  = 8.0
 )
 
-func (engine *Engine) advanceFleet(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) {
-	deltaTime := 1 / float64(engine.tickRate)
+func (engine *Engine) advanceFleet(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex, deltaSeconds float64) {
 	desiredX, desiredY := engine.computeFleetAcceleration(fleet, target, steeringIndex, planetIndex)
 	desiredX, desiredY = normalizeVector(desiredX, desiredY)
 	if desiredX == 0 && desiredY == 0 {
@@ -36,13 +35,13 @@ func (engine *Engine) advanceFleet(id int, fleet *Fleet, target *Planet, steerin
 		currentY,
 		desiredX,
 		desiredY,
-		fleetTurnRateRadians*deltaTime,
+		fleetTurnRateRadians*deltaSeconds,
 	)
 	fleet.VX = nextHeadingX * engine.fleetSpeed
 	fleet.VY = nextHeadingY * engine.fleetSpeed
 
-	nextX := fleet.X + fleet.VX*deltaTime
-	nextY := fleet.Y + fleet.VY*deltaTime
+	nextX := fleet.X + fleet.VX*deltaSeconds
+	nextY := fleet.Y + fleet.VY*deltaSeconds
 	if segmentIntersectsCircle(fleet.X, fleet.Y, nextX, nextY, target, fleetCollisionRadius) {
 		engine.resolveArrival(id, fleet, target)
 		return
@@ -223,6 +222,7 @@ func (engine *Engine) resolveArrival(id int, fleet *Fleet, target *Planet) {
 		}
 	}
 
+	engine.removeSortedFleetID(id)
 	delete(engine.fleets, id)
 }
 

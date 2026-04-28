@@ -29,19 +29,21 @@ var playerColorPalette = []int{
 }
 
 type Engine struct {
-	mu           sync.RWMutex
-	tick         int64
-	tickRate     int
-	fleetSpeed   float64
-	growthTimer  float64
-	worldWidth   float64
-	worldHeight  float64
-	planets      map[int]*Planet
-	planetIndex  *planetSpatialIndex
-	fleets       map[int]*Fleet
-	nextFleetID  int
-	mapName      string
-	playerColors []PlayerColor
+	mu              sync.RWMutex
+	tick            int64
+	tickRate        int
+	fleetSpeed      float64
+	growthTimer     float64
+	worldWidth      float64
+	worldHeight     float64
+	planets         map[int]*Planet
+	planetIndex     *planetSpatialIndex
+	sortedPlanetIDs []int
+	fleets          map[int]*Fleet
+	sortedFleetIDs  []int
+	nextFleetID     int
+	mapName         string
+	playerColors    []PlayerColor
 }
 
 const (
@@ -58,17 +60,25 @@ func NewEngineWithConfig(config MapConfig) *Engine {
 	config = normalizeMapConfig(config)
 	mapLayout := newRandomMapLayoutWithConfig(config)
 
+	sortedPlanetIDs := make([]int, 0, len(mapLayout.Planets))
+	for id := range mapLayout.Planets {
+		sortedPlanetIDs = append(sortedPlanetIDs, id)
+	}
+	slices.Sort(sortedPlanetIDs)
+
 	return &Engine{
-		tickRate:     DefaultIdleTickRate,
-		fleetSpeed:   defaultFleetSpeedUPS,
-		worldWidth:   mapLayout.Width,
-		worldHeight:  mapLayout.Height,
-		planets:      mapLayout.Planets,
-		planetIndex:  newPlanetSpatialIndex(mapLayout.Planets),
-		fleets:       make(map[int]*Fleet),
-		nextFleetID:  1,
-		mapName:      mapLayout.Name,
-		playerColors: resolvePlayerColors(config.PlayerCount),
+		tickRate:        DefaultIdleTickRate,
+		fleetSpeed:      defaultFleetSpeedUPS,
+		worldWidth:      mapLayout.Width,
+		worldHeight:     mapLayout.Height,
+		planets:         mapLayout.Planets,
+		planetIndex:     newPlanetSpatialIndex(mapLayout.Planets),
+		sortedPlanetIDs: sortedPlanetIDs,
+		fleets:          make(map[int]*Fleet),
+		sortedFleetIDs:  make([]int, 0),
+		nextFleetID:     1,
+		mapName:         mapLayout.Name,
+		playerColors:    resolvePlayerColors(config.PlayerCount),
 	}
 }
 
@@ -99,16 +109,17 @@ func (engine *Engine) Tick() int64 {
 	return engine.tick
 }
 
-func (engine *Engine) Advance() Snapshot {
+func (engine *Engine) Advance(deltaSeconds float64) (Snapshot, int, bool) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 
 	engine.tick++
-	engine.moveFleets()
-	engine.growPlanets()
-	engine.tickRate = engine.resolveDynamicTickRate()
+	fleetIndex := engine.moveFleets(deltaSeconds)
+	engine.growPlanets(deltaSeconds)
+	engine.tickRate = engine.resolveDynamicTickRate(fleetIndex)
 
-	return engine.buildSnapshot()
+	winnerID, hasWinner := engine.checkWinner()
+	return engine.buildSnapshot(), winnerID, hasWinner
 }
 
 func (engine *Engine) Snapshot() Snapshot {
@@ -129,6 +140,10 @@ func (engine *Engine) Winner() (int, bool) {
 	engine.mu.RLock()
 	defer engine.mu.RUnlock()
 
+	return engine.checkWinner()
+}
+
+func (engine *Engine) checkWinner() (int, bool) {
 	winnerID := 0
 	for _, planet := range engine.planets {
 		if planet.Owner == 0 {
@@ -252,6 +267,8 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 			}
 
 			engine.fleets[fleet.ID] = fleet
+			// Fleet IDs are monotonically increasing, so appending keeps the slice sorted.
+			engine.sortedFleetIDs = append(engine.sortedFleetIDs, fleet.ID)
 			if shipIndex == 0 {
 				firstFleet = *fleet
 			}
@@ -261,7 +278,7 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 		}
 	}
 
-	engine.tickRate = engine.resolveDynamicTickRate()
+	engine.tickRate = engine.resolveDynamicTickRate(nil)
 
 	return firstFleet, nil
 }
@@ -288,12 +305,10 @@ func maxShipsOnLaunchRing(radius float64) int {
 	return capacity
 }
 
-func (engine *Engine) moveFleets() {
-	fleetIDs := make([]int, 0, len(engine.fleets))
-	for id := range engine.fleets {
-		fleetIDs = append(fleetIDs, id)
-	}
-	slices.Sort(fleetIDs)
+func (engine *Engine) moveFleets(deltaSeconds float64) *fleetSpatialIndex {
+	// Clone the sorted slice so that arrivals/merges during iteration don't
+	// corrupt it via in-place shifts.
+	fleetIDs := slices.Clone(engine.sortedFleetIDs)
 	steeringIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance+fleetInfluencePadding)
 	planetIndex := engine.planetIndex
 	if planetIndex == nil {
@@ -312,20 +327,21 @@ func (engine *Engine) moveFleets() {
 			continue
 		}
 
-		engine.advanceFleet(id, fleet, target, steeringIndex, planetIndex)
+		engine.advanceFleet(id, fleet, target, steeringIndex, planetIndex, deltaSeconds)
 	}
 
 	collisionIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance)
 	engine.resolveFleetCollisions(collisionIndex)
 	engine.mergeFleets(collisionIndex)
+	return collisionIndex
 }
 
-func (engine *Engine) growPlanets() {
-	if engine.tickRate < 1 {
+func (engine *Engine) growPlanets(deltaSeconds float64) {
+	if deltaSeconds <= 0 {
 		return
 	}
 
-	engine.growthTimer += 1 / float64(engine.tickRate)
+	engine.growthTimer += deltaSeconds
 	if engine.growthTimer+growthTimeEpsilon < planetGrowthIntervalSeconds {
 		return
 	}
@@ -359,11 +375,15 @@ func (engine *Engine) buildSnapshot() Snapshot {
 }
 
 func (engine *Engine) buildSnapshotForPlayer(playerID int) Snapshot {
-	planetIDs := make([]int, 0, len(engine.planets))
-	for id := range engine.planets {
-		planetIDs = append(planetIDs, id)
+	planetIDs := engine.sortedPlanetIDs
+	if len(planetIDs) != len(engine.planets) {
+		// Fallback for engines not created via NewEngineWithConfig (e.g. tests).
+		planetIDs = make([]int, 0, len(engine.planets))
+		for id := range engine.planets {
+			planetIDs = append(planetIDs, id)
+		}
+		slices.Sort(planetIDs)
 	}
-	slices.Sort(planetIDs)
 
 	planets := make([]Planet, 0, len(planetIDs))
 	for _, id := range planetIDs {
@@ -377,15 +397,12 @@ func (engine *Engine) buildSnapshotForPlayer(playerID int) Snapshot {
 		planets = append(planets, planet)
 	}
 
-	fleetIDs := make([]int, 0, len(engine.fleets))
-	for id := range engine.fleets {
-		fleetIDs = append(fleetIDs, id)
-	}
-	slices.Sort(fleetIDs)
-
-	fleets := make([]Fleet, 0, len(fleetIDs))
-	for _, id := range fleetIDs {
-		fleets = append(fleets, *engine.fleets[id])
+	fleets := make([]Fleet, 0, len(engine.sortedFleetIDs))
+	for _, id := range engine.sortedFleetIDs {
+		fleet := engine.fleets[id]
+		if fleet != nil {
+			fleets = append(fleets, *fleet)
+		}
 	}
 
 	return Snapshot{
@@ -397,4 +414,14 @@ func (engine *Engine) buildSnapshotForPlayer(playerID int) Snapshot {
 		Fleets:       fleets,
 		PlayerColors: append([]PlayerColor(nil), engine.playerColors...),
 	}
+}
+
+// removeSortedFleetID removes id from the sorted fleet ID slice in O(log N)
+// search + O(N) shift. Called on every fleet deletion (arrival, merge).
+func (engine *Engine) removeSortedFleetID(id int) {
+	idx, found := slices.BinarySearch(engine.sortedFleetIDs, id)
+	if !found {
+		return
+	}
+	engine.sortedFleetIDs = append(engine.sortedFleetIDs[:idx], engine.sortedFleetIDs[idx+1:]...)
 }

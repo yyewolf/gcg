@@ -13,7 +13,7 @@ func TestGrowPlanetsUsesSlowerInterval(t *testing.T) {
 	}
 
 	for range DefaultIdleTickRate {
-		engine.growPlanets()
+		engine.growPlanets(1 / float64(DefaultIdleTickRate))
 	}
 	if ships := engine.planets[1].Ships; ships != 10 {
 		t.Fatalf("expected no growth after 1 second, got %d ships", ships)
@@ -21,7 +21,7 @@ func TestGrowPlanetsUsesSlowerInterval(t *testing.T) {
 
 	engine.tickRate = DefaultTickRate
 	for range DefaultTickRate {
-		engine.growPlanets()
+		engine.growPlanets(1 / float64(DefaultTickRate))
 	}
 	if ships := engine.planets[1].Ships; ships != 13 {
 		t.Fatalf("expected growth after slower interval, got %d ships", ships)

@@ -7,7 +7,7 @@ func TestResolveDynamicTickRateDefaultsToIdle(t *testing.T) {
 
 	engine := &Engine{tickRate: DefaultIdleTickRate, planets: map[int]*Planet{}}
 
-	if tickRate := engine.resolveDynamicTickRate(); tickRate != DefaultIdleTickRate {
+	if tickRate := engine.resolveDynamicTickRate(nil); tickRate != DefaultIdleTickRate {
 		t.Fatalf("expected idle tickrate %d, got %d", DefaultIdleTickRate, tickRate)
 	}
 }
@@ -27,8 +27,9 @@ func TestResolveDynamicTickRateRaisesNearArrival(t *testing.T) {
 		},
 	}
 	engine.planetIndex = newPlanetSpatialIndex(engine.planets)
+	fleetIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance)
 
-	if tickRate := engine.resolveDynamicTickRate(); tickRate != DefaultTickRate {
+	if tickRate := engine.resolveDynamicTickRate(fleetIndex); tickRate != DefaultTickRate {
 		t.Fatalf("expected high tickrate %d near arrival, got %d", DefaultTickRate, tickRate)
 	}
 }
