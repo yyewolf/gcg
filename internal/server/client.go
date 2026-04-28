@@ -1,11 +1,11 @@
 package server
 
 import (
-	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
 
+	cbor "github.com/fxamacker/cbor/v2"
 	"github.com/gorilla/websocket"
 )
 
@@ -28,8 +28,12 @@ func (client *client) readLoop() {
 	client.conn.SetReadLimit(1024)
 
 	for {
+		_, msgBytes, err := client.conn.ReadMessage()
+		if err != nil {
+			return
+		}
 		var command clientCommand
-		if err := client.conn.ReadJSON(&command); err != nil {
+		if err := cbor.Unmarshal(msgBytes, &command); err != nil {
 			return
 		}
 
@@ -87,7 +91,7 @@ func (client *client) writeLoop() {
 			if err := client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
 				return
 			}
-			if err := client.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err := client.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				return
 			}
 		case <-pingTicker.C:
@@ -104,7 +108,7 @@ func (client *client) writeLoop() {
 }
 
 func (client *client) sendJSON(payload any) {
-	encoded, err := json.Marshal(payload)
+	encoded, err := cbor.Marshal(payload)
 	if err != nil {
 		slog.Error("marshal client payload failed", "err", err)
 		return

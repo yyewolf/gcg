@@ -1,3 +1,4 @@
+import { decode as cborDecode, encode as cborEncode } from "cbor-x";
 import {
   type JoinLobbyCommand,
   parseServerMessage,
@@ -50,6 +51,8 @@ export class GameClient {
       this.emit({ type: "connection", status: "open" });
     });
 
+    socket.binaryType = "arraybuffer";
+
     socket.addEventListener("message", (event: MessageEvent) => {
       this.handleMessage(event);
     });
@@ -98,7 +101,7 @@ export class GameClient {
     }
 
     const command: SendFleetCommand = { t: "send", src, dst, pct };
-    this.socket.send(JSON.stringify(command));
+    this.socket.send(cborEncode(command));
     return true;
   }
 
@@ -112,7 +115,7 @@ export class GameClient {
     }
 
     const command: JoinLobbyCommand = { t: "join", lobby };
-    this.socket.send(JSON.stringify(command));
+    this.socket.send(cborEncode(command));
     return true;
   }
 
@@ -126,20 +129,31 @@ export class GameClient {
     }
 
     const command: PlayCommand = { t: "play" };
-    this.socket.send(JSON.stringify(command));
+    this.socket.send(cborEncode(command));
     return true;
   }
 
   private handleMessage(event: MessageEvent): void {
-    if (typeof event.data !== "string") {
+    if (!(event.data instanceof ArrayBuffer)) {
       this.emit({
         type: "error",
-        message: "Received a non-text server payload.",
+        message: "Received a non-binary server payload.",
       });
       return;
     }
 
-    const message = parseServerMessage(event.data);
+    let decoded: unknown;
+    try {
+      decoded = cborDecode(new Uint8Array(event.data)) as unknown;
+    } catch {
+      this.emit({
+        type: "error",
+        message: "Failed to decode CBOR server payload.",
+      });
+      return;
+    }
+
+    const message = parseServerMessage(decoded);
     if (message === null) {
       this.emit({
         type: "error",

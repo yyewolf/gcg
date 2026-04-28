@@ -308,14 +308,7 @@ function parseSnapshot(value: unknown): Snapshot | null {
   };
 }
 
-export function parseServerMessage(raw: string): ServerMessage | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    return null;
-  }
-
+export function parseServerMessage(parsed: unknown): ServerMessage | null {
   if (!isRecord(parsed) || typeof parsed.t !== "string") {
     return null;
   }
