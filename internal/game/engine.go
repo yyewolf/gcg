@@ -44,6 +44,12 @@ type Engine struct {
 	playerColors []PlayerColor
 }
 
+const (
+	DefaultTickRate      = 15
+	DefaultIdleTickRate  = 5
+	defaultFleetSpeedUPS = 110.0
+)
+
 func NewEngine() *Engine {
 	return NewEngineWithConfig(DefaultMapConfig())
 }

@@ -204,17 +204,17 @@ func TestPlayJoinsAvailableLobby(t *testing.T) {
 		t.Fatal("expected play to join a lobby")
 	}
 
-	joinedID, status, players, _, playing := current.clientLobbyState()
-	if joinedID == "" {
+	state := current.clientLobbyState()
+	if state.id == "" {
 		t.Fatal("expected joined lobby id to be set")
 	}
-	if status != "waiting" && status != "countdown" {
-		t.Fatalf("expected waiting or countdown lobby status, got %q", status)
+	if state.status != "waiting" && state.status != "countdown" {
+		t.Fatalf("expected waiting or countdown lobby status, got %q", state.status)
 	}
-	if players != 1 {
-		t.Fatalf("expected lobby to contain 1 player, got %d", players)
+	if state.playerCount != 1 {
+		t.Fatalf("expected lobby to contain 1 player, got %d", state.playerCount)
 	}
-	if playing {
+	if state.playing {
 		t.Fatal("expected quick-play target lobby not to be in-game")
 	}
 	select {

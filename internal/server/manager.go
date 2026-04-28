@@ -97,7 +97,8 @@ func (manager *lobbyManager) handleWS(writer http.ResponseWriter, request *http.
 }
 
 func (manager *lobbyManager) play(client *client) error {
-	manager.mu.RLock()
+	manager.mu.Lock()
+	manager.ensureOpenLobbyLocked()
 	var target *lobby
 	for _, lobby := range manager.lobbies {
 		if !lobby.isPlaying() {
@@ -105,20 +106,7 @@ func (manager *lobbyManager) play(client *client) error {
 			break
 		}
 	}
-	manager.mu.RUnlock()
-	if target == nil {
-		manager.mu.Lock()
-		manager.ensureOpenLobbyLocked()
-		manager.mu.Unlock()
-		manager.mu.RLock()
-		for _, lobby := range manager.lobbies {
-			if !lobby.isPlaying() {
-				target = lobby
-				break
-			}
-		}
-		manager.mu.RUnlock()
-	}
+	manager.mu.Unlock()
 	if target == nil {
 		return errUnknownLobby
 	}
@@ -283,15 +271,14 @@ func (manager *lobbyManager) sendLobbyState(client *client) {
 }
 
 func (manager *lobbyManager) sendLobbyStateWithSummaries(client *client, summaries []lobbySummary) {
-	lobby := client.currentLobby()
 	payload := outboundMessage{Type: "lobby", Lobbies: summaries}
-	if lobby != nil {
-		joinedID, status, players, countdownMS, playing := lobby.clientLobbyState()
-		if !playing {
-			payload.JoinedLobbyID = joinedID
-			payload.LobbyStatus = status
-			payload.LobbyPlayers = players
-			payload.CountdownMS = countdownMS
+	if current := client.currentLobby(); current != nil {
+		state := current.clientLobbyState()
+		if !state.playing {
+			payload.JoinedLobbyID = state.id
+			payload.LobbyStatus = state.status
+			payload.LobbyPlayers = state.playerCount
+			payload.CountdownMS = state.countdownMS
 		}
 	}
 	client.sendJSON(payload)

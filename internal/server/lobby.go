@@ -284,10 +284,25 @@ func (lobby *lobby) snapshotClients() []*client {
 	return clients
 }
 
-func (lobby *lobby) clientLobbyState() (string, string, int, int64, bool) {
+// lobbyClientState is a snapshot of lobby state relevant to a connected client.
+type lobbyClientState struct {
+	id          string
+	status      string
+	playerCount int
+	countdownMS int64
+	playing     bool
+}
+
+func (lobby *lobby) clientLobbyState() lobbyClientState {
 	lobby.mu.RLock()
 	defer lobby.mu.RUnlock()
-	return lobby.id, lobby.statusLocked(), len(lobby.clients), lobby.countdownMSLocked(time.Now()), lobby.engine != nil
+	return lobbyClientState{
+		id:          lobby.id,
+		status:      lobby.statusLocked(),
+		playerCount: len(lobby.clients),
+		countdownMS: lobby.countdownMSLocked(time.Now()),
+		playing:     lobby.engine != nil,
+	}
 }
 
 func (lobby *lobby) summary() lobbySummary {
