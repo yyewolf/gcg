@@ -6,14 +6,21 @@ import "math"
 // proximity queries scan only the cells overlapping a given radius instead
 // of iterating every object in the world.
 
-type fleetSpatialCell struct {
-	x int
-	y int
+// fleetSpatialCell is a packed (cellX, cellY) grid coordinate encoded as a
+// single int64 so the runtime uses mapaccess1_fast64 instead of the generic
+// struct-key path (memhash128 / memequal128), which was ~50% of CPU time.
+type fleetSpatialCell = int64
+
+// packCell encodes a (cellX, cellY) pair into an int64. Each axis is stored
+// as a uint32, so coordinates in [-2^31, 2^31-1] are represented exactly.
+func packCell(x, y int) fleetSpatialCell {
+	return int64(uint32(x))<<32 | int64(uint32(y))
 }
 
 type fleetSpatialIndex struct {
-	cellSize float64
-	cells    map[fleetSpatialCell][]*Fleet
+	cellSize  float64
+	cells     map[fleetSpatialCell][]*Fleet
+	dirtyKeys []fleetSpatialCell
 }
 
 type planetSpatialIndex struct {
@@ -89,6 +96,42 @@ func newFleetSpatialIndex(fleets map[int]*Fleet, cellSize float64) *fleetSpatial
 	return index
 }
 
+// reset clears the index and rebuilds it from fleets, reusing the cells map
+// and per-cell slice backing arrays to avoid per-tick allocations.
+// Only cells that were populated in the previous tick are zeroed; the rest of
+// the map is left untouched (they already hold nil/empty slices).
+func (index *fleetSpatialIndex) reset(fleets map[int]*Fleet, cellSize float64) {
+	if cellSize <= 0 {
+		cellSize = 1
+	}
+	index.cellSize = cellSize
+
+	// Lazy initialization on first use.
+	if index.cells == nil {
+		index.cells = make(map[fleetSpatialCell][]*Fleet, len(fleets))
+	}
+
+	// Zero bucket lengths for all cells touched in the previous tick.
+	// This retains the backing arrays so future appends are allocation-free.
+	for _, k := range index.dirtyKeys {
+		index.cells[k] = index.cells[k][:0]
+	}
+	index.dirtyKeys = index.dirtyKeys[:0]
+
+	// Repopulate.
+	for _, fleet := range fleets {
+		if fleet == nil {
+			continue
+		}
+		cell := index.cellFor(fleet.X, fleet.Y)
+		if len(index.cells[cell]) == 0 {
+			// First write to this cell this tick — track it for the next reset.
+			index.dirtyKeys = append(index.dirtyKeys, cell)
+		}
+		index.cells[cell] = append(index.cells[cell], fleet)
+	}
+}
+
 func (index *fleetSpatialIndex) forEachNearby(x, y, radius float64, visit func(*Fleet)) {
 	if index == nil {
 		return
@@ -101,7 +144,7 @@ func (index *fleetSpatialIndex) forEachNearby(x, y, radius float64, visit func(*
 
 	for cellX := minCellX; cellX <= maxCellX; cellX++ {
 		for cellY := minCellY; cellY <= maxCellY; cellY++ {
-			for _, fleet := range index.cells[fleetSpatialCell{x: cellX, y: cellY}] {
+			for _, fleet := range index.cells[packCell(cellX, cellY)] {
 				visit(fleet)
 			}
 		}
@@ -109,10 +152,7 @@ func (index *fleetSpatialIndex) forEachNearby(x, y, radius float64, visit func(*
 }
 
 func (index *fleetSpatialIndex) cellFor(x, y float64) fleetSpatialCell {
-	return fleetSpatialCell{
-		x: int(math.Floor(x / index.cellSize)),
-		y: int(math.Floor(y / index.cellSize)),
-	}
+	return packCell(int(math.Floor(x/index.cellSize)), int(math.Floor(y/index.cellSize)))
 }
 
 func (index *planetSpatialIndex) forEachNearby(x, y, radius float64, visit func(*Planet)) {
@@ -135,7 +175,7 @@ func (index *planetSpatialIndex) forEachInBounds(minX, maxX, minY, maxY float64,
 
 	for cellX := minCellX; cellX <= maxCellX; cellX++ {
 		for cellY := minCellY; cellY <= maxCellY; cellY++ {
-			for _, planet := range index.cells[fleetSpatialCell{x: cellX, y: cellY}] {
+			for _, planet := range index.cells[packCell(cellX, cellY)] {
 				visit(planet)
 			}
 		}
@@ -143,8 +183,5 @@ func (index *planetSpatialIndex) forEachInBounds(minX, maxX, minY, maxY float64,
 }
 
 func (index *planetSpatialIndex) cellFor(x, y float64) fleetSpatialCell {
-	return fleetSpatialCell{
-		x: int(math.Floor(x / index.cellSize)),
-		y: int(math.Floor(y / index.cellSize)),
-	}
+	return packCell(int(math.Floor(x/index.cellSize)), int(math.Floor(y/index.cellSize)))
 }

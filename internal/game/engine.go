@@ -2,6 +2,7 @@ package game
 
 import (
 	"math"
+	"runtime"
 	"slices"
 	"sync"
 )
@@ -28,6 +29,12 @@ var playerColorPalette = []int{
 	0x34d399,
 }
 
+type fleetItem struct {
+	id     int
+	fleet  *Fleet
+	target *Planet
+}
+
 type Engine struct {
 	mu              sync.RWMutex
 	tick            int64
@@ -44,12 +51,21 @@ type Engine struct {
 	nextFleetID     int
 	mapName         string
 	playerColors    []PlayerColor
+	// tickBuf holds slices reused across every Advance() call to amortize
+	// per-tick allocations. Only accessed while mu write-lock is held.
+	tickBuf struct {
+		fleetIDs       []int
+		items          []fleetItem
+		arrived        []bool
+		arrivals       []arrivalEvent
+		steeringIndex  fleetSpatialIndex
+		collisionIndex fleetSpatialIndex
+	}
 }
 
 const (
-	DefaultTickRate      = 15
-	DefaultIdleTickRate  = 5
-	defaultFleetSpeedUPS = 110.0
+	DefaultTickRate      = 20
+	defaultFleetSpeedUPS = 120.0
 )
 
 func NewEngine() *Engine {
@@ -67,7 +83,7 @@ func NewEngineWithConfig(config MapConfig) *Engine {
 	slices.Sort(sortedPlanetIDs)
 
 	return &Engine{
-		tickRate:        DefaultIdleTickRate,
+		tickRate:        DefaultTickRate,
 		fleetSpeed:      defaultFleetSpeedUPS,
 		worldWidth:      mapLayout.Width,
 		worldHeight:     mapLayout.Height,
@@ -109,17 +125,15 @@ func (engine *Engine) Tick() int64 {
 	return engine.tick
 }
 
-func (engine *Engine) Advance(deltaSeconds float64) (Snapshot, int, bool) {
+func (engine *Engine) Advance(deltaSeconds float64) (int, bool) {
 	engine.mu.Lock()
 	defer engine.mu.Unlock()
 
 	engine.tick++
-	fleetIndex := engine.moveFleets(deltaSeconds)
+	engine.moveFleets(deltaSeconds)
 	engine.growPlanets(deltaSeconds)
-	engine.tickRate = engine.resolveDynamicTickRate(fleetIndex)
 
-	winnerID, hasWinner := engine.checkWinner()
-	return engine.buildSnapshot(), winnerID, hasWinner
+	return engine.checkWinner()
 }
 
 func (engine *Engine) Snapshot() Snapshot {
@@ -278,8 +292,6 @@ func (engine *Engine) SendFleet(playerID, sourceID, targetID, percentage int) (F
 		}
 	}
 
-	engine.tickRate = engine.resolveDynamicTickRate(nil)
-
 	return firstFleet, nil
 }
 
@@ -305,35 +317,141 @@ func maxShipsOnLaunchRing(radius float64) int {
 	return capacity
 }
 
-func (engine *Engine) moveFleets(deltaSeconds float64) *fleetSpatialIndex {
-	// Clone the sorted slice so that arrivals/merges during iteration don't
-	// corrupt it via in-place shifts.
-	fleetIDs := slices.Clone(engine.sortedFleetIDs)
-	steeringIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance+fleetInfluencePadding)
+// parallelFleetThreshold is the minimum fleet count before parallel
+// advancement is used. Below this the goroutine overhead exceeds the gain.
+const parallelFleetThreshold = 64
+
+type arrivalEvent struct {
+	id     int
+	fleet  *Fleet
+	target *Planet
+}
+
+func (engine *Engine) moveFleets(deltaSeconds float64) {
+	buf := &engine.tickBuf
+	// Reuse the fleet-ID snapshot buffer; avoids a new allocation every tick.
+	buf.fleetIDs = append(buf.fleetIDs[:0], engine.sortedFleetIDs...)
+
+	buf.steeringIndex.reset(engine.fleets, fleetSeparationDistance+fleetInfluencePadding)
 	planetIndex := engine.planetIndex
 	if planetIndex == nil {
 		planetIndex = newPlanetSpatialIndex(engine.planets)
 		engine.planetIndex = planetIndex
 	}
 
+	buf.arrivals = buf.arrivals[:0]
+	if len(buf.fleetIDs) >= parallelFleetThreshold {
+		engine.moveFleetsParallel(buf.fleetIDs, &buf.steeringIndex, planetIndex, deltaSeconds)
+	} else {
+		engine.moveFleetsSerial(buf.fleetIDs, &buf.steeringIndex, planetIndex, deltaSeconds)
+	}
+
+	engine.applyArrivals(buf.arrivals)
+
+	buf.collisionIndex.reset(engine.fleets, fleetSeparationDistance)
+	engine.resolveFleetCollisions(&buf.collisionIndex)
+	engine.mergeFleets(&buf.collisionIndex)
+}
+
+// applyArrivals resolves the planet side-effects of all arrived fleets and
+// removes them from the engine. Arrivals are processed serially: with at most
+// ~20 per tick the goroutine-spawn overhead of a concurrent approach exceeds
+// any parallel benefit, and avoids map/goroutine allocations entirely.
+func (engine *Engine) applyArrivals(arrivals []arrivalEvent) {
+	for _, ev := range arrivals {
+		ev.fleet.X = ev.target.X
+		ev.fleet.Y = ev.target.Y
+		if ev.target.Owner == ev.fleet.Owner {
+			ev.target.Ships += ev.fleet.Ships
+		} else {
+			ev.target.Ships -= ev.fleet.Ships
+			if ev.target.Ships < 0 {
+				ev.target.Owner = ev.fleet.Owner
+				ev.target.Ships = -ev.target.Ships
+			}
+		}
+		engine.removeSortedFleetID(ev.id)
+		delete(engine.fleets, ev.id)
+	}
+}
+
+// moveFleetsSerial advances fleets one-by-one on the calling goroutine.
+// Arrivals are appended directly to engine.tickBuf.arrivals.
+func (engine *Engine) moveFleetsSerial(fleetIDs []int, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex, deltaSeconds float64) {
 	for _, id := range fleetIDs {
 		fleet := engine.fleets[id]
 		if fleet == nil {
 			continue
 		}
-
 		target := engine.planets[fleet.TargetID]
 		if target == nil {
 			continue
 		}
+		if engine.advanceFleet(fleet, target, steeringIndex, planetIndex, deltaSeconds) {
+			engine.tickBuf.arrivals = append(engine.tickBuf.arrivals, arrivalEvent{id: id, fleet: fleet, target: target})
+		}
+	}
+}
 
-		engine.advanceFleet(id, fleet, target, steeringIndex, planetIndex, deltaSeconds)
+// moveFleetsParallel advances fleets concurrently across runtime.NumCPU()*4
+// workers. Each worker owns a disjoint chunk of fleet items so no
+// synchronization is needed during advancement. Arrivals are appended
+// directly to engine.tickBuf.arrivals after all workers finish.
+// All intermediate slices (items, arrived) are reused from engine.tickBuf.
+func (engine *Engine) moveFleetsParallel(fleetIDs []int, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex, deltaSeconds float64) {
+	buf := &engine.tickBuf
+
+	buf.items = buf.items[:0]
+	for _, id := range fleetIDs {
+		fleet := engine.fleets[id]
+		if fleet == nil {
+			continue
+		}
+		target := engine.planets[fleet.TargetID]
+		if target == nil {
+			continue
+		}
+		buf.items = append(buf.items, fleetItem{id: id, fleet: fleet, target: target})
 	}
 
-	collisionIndex := newFleetSpatialIndex(engine.fleets, fleetSeparationDistance)
-	engine.resolveFleetCollisions(collisionIndex)
-	engine.mergeFleets(collisionIndex)
-	return collisionIndex
+	n := len(buf.items)
+	if n == 0 {
+		return
+	}
+
+	// Grow or reuse the arrived flag slice; clear any stale true values.
+	if cap(buf.arrived) < n {
+		buf.arrived = make([]bool, n)
+	} else {
+		buf.arrived = buf.arrived[:n]
+		clear(buf.arrived)
+	}
+
+	numWorkers := min(runtime.NumCPU()*4, n)
+	chunkSize := (n + numWorkers - 1) / numWorkers
+
+	var wg sync.WaitGroup
+	for w := range numWorkers {
+		start := w * chunkSize
+		if start >= n {
+			break
+		}
+		end := min(start+chunkSize, n)
+		wg.Add(1)
+		go func(slice []fleetItem, out []bool) {
+			defer wg.Done()
+			for i, it := range slice {
+				out[i] = engine.advanceFleet(it.fleet, it.target, steeringIndex, planetIndex, deltaSeconds)
+			}
+		}(buf.items[start:end], buf.arrived[start:end])
+	}
+	wg.Wait()
+
+	for i, it := range buf.items {
+		if buf.arrived[i] {
+			buf.arrivals = append(buf.arrivals, arrivalEvent{id: it.id, fleet: it.fleet, target: it.target})
+		}
+	}
 }
 
 func (engine *Engine) growPlanets(deltaSeconds float64) {

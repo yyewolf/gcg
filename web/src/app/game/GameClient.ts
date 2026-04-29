@@ -1,9 +1,12 @@
 import { decode as cborDecode, encode as cborEncode } from "cbor-x";
 import {
+  BINARY_STATE_MAGIC,
   type JoinLobbyCommand,
+  parseBinaryStateFrame,
   parseServerMessage,
   type PlayCommand,
   type SendFleetCommand,
+  type SendManyCommand,
   type ServerMessage,
 } from "./protocol";
 
@@ -105,6 +108,20 @@ export class GameClient {
     return true;
   }
 
+  public sendFleetFromMany(srcs: number[], dst: number, pct: number): boolean {
+    if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
+      this.emit({
+        type: "error",
+        message: "Connection is not ready yet.",
+      });
+      return false;
+    }
+
+    const command: SendManyCommand = { t: "sendmany", srcs, dst, pct };
+    this.socket.send(cborEncode(command));
+    return true;
+  }
+
   public joinLobby(lobby: string): boolean {
     if (this.socket === null || this.socket.readyState !== WebSocket.OPEN) {
       this.emit({
@@ -142,9 +159,25 @@ export class GameClient {
       return;
     }
 
+    const bytes = new Uint8Array(event.data);
+
+    // Binary state frame: dispatch directly without CBOR decode overhead.
+    if (bytes[0] === BINARY_STATE_MAGIC) {
+      const message = parseBinaryStateFrame(event.data);
+      if (message === null) {
+        this.emit({
+          type: "error",
+          message: "Failed to decode binary state frame.",
+        });
+        return;
+      }
+      this.emit({ type: "message", message });
+      return;
+    }
+
     let decoded: unknown;
     try {
-      decoded = cborDecode(new Uint8Array(event.data)) as unknown;
+      decoded = cborDecode(bytes) as unknown;
     } catch {
       this.emit({
         type: "error",

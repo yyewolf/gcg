@@ -67,6 +67,30 @@ func (client *client) readLoop() {
 			}
 
 			lobby.nudge()
+		case "sendmany":
+			lobby := client.currentLobby()
+			if lobby == nil {
+				client.sendJSON(outboundMessage{Type: "error", Error: "join a lobby first"})
+				continue
+			}
+
+			engine := lobby.engineInstance()
+			if engine == nil {
+				client.sendJSON(outboundMessage{Type: "error", Error: "match has not started yet"})
+				continue
+			}
+
+			sentAny := false
+			for _, srcID := range command.Sources {
+				if _, err := engine.SendFleet(client.playerIDValue(), srcID, command.Target, command.Pct); err != nil {
+					// Non-fatal: skip planets the player doesn't own or has no ships on.
+					continue
+				}
+				sentAny = true
+			}
+			if sentAny {
+				lobby.nudge()
+			}
 		default:
 			client.sendJSON(outboundMessage{Type: "error", Error: "unknown command"})
 		}
@@ -114,6 +138,10 @@ func (client *client) sendJSON(payload any) {
 		return
 	}
 
+	client.sendRaw(encoded)
+}
+
+func (client *client) sendRaw(data []byte) {
 	client.mu.Lock()
 	defer client.mu.Unlock()
 	if client.closed {
@@ -121,10 +149,9 @@ func (client *client) sendJSON(payload any) {
 	}
 
 	select {
-	case client.send <- encoded:
+	case client.send <- data:
 	default:
 		go client.manager.unregister(client)
-		return
 	}
 }
 

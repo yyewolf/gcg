@@ -6,14 +6,14 @@ func TestGrowPlanetsUsesSlowerInterval(t *testing.T) {
 	t.Parallel()
 
 	engine := &Engine{
-		tickRate: DefaultIdleTickRate,
+		tickRate: DefaultTickRate,
 		planets: map[int]*Planet{
 			1: {ID: 1, Owner: 1, Ships: 10, Growth: 3},
 		},
 	}
 
-	for range DefaultIdleTickRate {
-		engine.growPlanets(1 / float64(DefaultIdleTickRate))
+	for range DefaultTickRate {
+		engine.growPlanets(1 / float64(DefaultTickRate))
 	}
 	if ships := engine.planets[1].Ships; ships != 10 {
 		t.Fatalf("expected no growth after 1 second, got %d ships", ships)

@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -234,10 +236,10 @@ func TestPlayJoinsAvailableLobby(t *testing.T) {
 	}
 }
 
-func TestCompactStateMessageOmitsStaticSnapshotFields(t *testing.T) {
+func TestBinaryStateFrame(t *testing.T) {
 	t.Parallel()
 
-	encoded, err := json.Marshal(newCompactStateMessage(game.Snapshot{
+	snapshot := game.Snapshot{
 		Tick:     7,
 		TickRate: 30,
 		Width:    200,
@@ -249,32 +251,74 @@ func TestCompactStateMessageOmitsStaticSnapshotFields(t *testing.T) {
 			{ID: 4, Owner: 2, SourceID: 1, TargetID: 3, Ships: 5, X: 11.5, Y: 22.5, VX: 3.5, VY: -1.5},
 		},
 		PlayerColors: []game.PlayerColor{{PlayerID: 2, Color: 0xff728c}},
-	}))
-	if err != nil {
-		t.Fatalf("marshal compact state message: %v", err)
 	}
 
-	var decoded map[string]any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatalf("unmarshal compact state message: %v", err)
+	frame := encodeBinaryState(snapshot, nil)
+
+	// Header
+	if frame[0] != binaryStateMagic {
+		t.Fatalf("magic byte: got 0x%02x, want 0x%02x", frame[0], binaryStateMagic)
+	}
+	if got := int64(binary.LittleEndian.Uint64(frame[1:])); got != 7 {
+		t.Fatalf("tick: got %d, want 7", got)
+	}
+	if frame[9] != 30 {
+		t.Fatalf("tickRate: got %d, want 30", frame[9])
+	}
+	if got := binary.LittleEndian.Uint16(frame[10:]); got != 1 {
+		t.Fatalf("nPlanets: got %d, want 1", got)
 	}
 
-	if _, ok := decoded["state"]; ok {
-		t.Fatal("expected compact state payload to omit full state field")
+	// Planet 0 at offset 12
+	if got := binary.LittleEndian.Uint16(frame[12:]); got != 1 {
+		t.Fatalf("planet.ID: got %d, want 1", got)
 	}
-	if _, ok := decoded["p"]; !ok {
-		t.Fatal("expected compact state payload to include planet updates")
+	if frame[14] != 2 {
+		t.Fatalf("planet.Owner: got %d, want 2", frame[14])
 	}
-	if _, ok := decoded["f"]; !ok {
-		t.Fatal("expected compact state payload to include fleet updates")
+	if got := int32(binary.LittleEndian.Uint32(frame[15:])); got != 18 {
+		t.Fatalf("planet.Ships: got %d, want 18", got)
 	}
-	if _, ok := decoded["r"]; !ok {
-		t.Fatal("expected compact state payload to include tick rate")
+
+	// nFleets at offset 12 + 7 = 19
+	if got := binary.LittleEndian.Uint16(frame[19:]); got != 1 {
+		t.Fatalf("nFleets: got %d, want 1", got)
 	}
-	if _, ok := decoded["width"]; ok {
-		t.Fatal("expected compact state payload to omit width")
+
+	// Fleet 0 at offset 21
+	const fleetOff = 21
+	if got := binary.LittleEndian.Uint32(frame[fleetOff:]); got != 4 {
+		t.Fatalf("fleet.ID: got %d, want 4", got)
 	}
-	if _, ok := decoded["playerColors"]; ok {
-		t.Fatal("expected compact state payload to omit player colors")
+	if frame[fleetOff+4] != 2 {
+		t.Fatalf("fleet.Owner: got %d, want 2", frame[fleetOff+4])
+	}
+	if got := binary.LittleEndian.Uint16(frame[fleetOff+5:]); got != 1 {
+		t.Fatalf("fleet.SourceID: got %d, want 1", got)
+	}
+	if got := binary.LittleEndian.Uint16(frame[fleetOff+7:]); got != 3 {
+		t.Fatalf("fleet.TargetID: got %d, want 3", got)
+	}
+	if got := binary.LittleEndian.Uint16(frame[fleetOff+9:]); got != 5 {
+		t.Fatalf("fleet.Ships: got %d, want 5", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(frame[fleetOff+11:])); got != 11.5 {
+		t.Fatalf("fleet.X: got %v, want 11.5", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(frame[fleetOff+15:])); got != 22.5 {
+		t.Fatalf("fleet.Y: got %v, want 22.5", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(frame[fleetOff+19:])); got != 3.5 {
+		t.Fatalf("fleet.VX: got %v, want 3.5", got)
+	}
+	if got := math.Float32frombits(binary.LittleEndian.Uint32(frame[fleetOff+23:])); got != -1.5 {
+		t.Fatalf("fleet.VY: got %v, want -1.5", got)
+	}
+
+	// Static fields (width, height, playerColors) must NOT appear — the frame
+	// is fixed-size binary, so there is nothing to check here beyond size.
+	expectedSize := 12 + 1*7 + 2 + 1*27
+	if len(frame) != expectedSize {
+		t.Fatalf("frame size: got %d, want %d", len(frame), expectedSize)
 	}
 }

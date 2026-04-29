@@ -32,6 +32,9 @@ type lobby struct {
 	emptySince      time.Time
 	poke            chan struct{}
 	lastTick        time.Time
+	// binaryStateBuf is reused across ticks to avoid per-tick allocation when
+	// encoding state frames. Only accessed from the lobby's run goroutine.
+	binaryStateBuf []byte
 }
 
 func newLobby(manager *lobbyManager, id string, order int, cancel context.CancelFunc) *lobby {
@@ -116,9 +119,9 @@ func (lobby *lobby) step() {
 			deltaSeconds = now.Sub(lobby.lastTick).Seconds()
 		}
 		lobby.lastTick = now
-		state, winnerID, hasWinner := engine.Advance(deltaSeconds)
+		winnerID, hasWinner := engine.Advance(deltaSeconds)
 		lobby.mu.Unlock()
-		lobby.broadcastState(state.Tick)
+		lobby.broadcastState(engine.Tick())
 		if hasWinner {
 			lobby.finishGame(winnerID)
 		}
@@ -315,7 +318,12 @@ func (lobby *lobby) broadcastState(_ int64) {
 
 	for _, client := range clients {
 		snapshot := engine.SnapshotForPlayer(client.playerIDValue())
-		client.sendJSON(newCompactStateMessage(snapshot))
+		lobby.binaryStateBuf = encodeBinaryState(snapshot, lobby.binaryStateBuf)
+		// Copy into a fresh slice: the send channel holds the reference until
+		// the write loop drains it, but we reuse binaryStateBuf next iteration.
+		msg := make([]byte, len(lobby.binaryStateBuf))
+		copy(msg, lobby.binaryStateBuf)
+		client.sendRaw(msg)
 	}
 }
 

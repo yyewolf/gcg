@@ -110,6 +110,73 @@ export interface SendFleetCommand {
   pct: number;
 }
 
+export interface SendManyCommand {
+  t: "sendmany";
+  srcs: number[];
+  dst: number;
+  pct: number;
+}
+
+// BINARY STATE FRAME
+// Magic byte that identifies a binary state frame (not valid as a CBOR map header).
+export const BINARY_STATE_MAGIC = 0x01;
+
+/**
+ * Decode a binary state frame written by encodeBinaryState on the server.
+ * Layout (little-endian):
+ *   [0]       uint8   magic
+ *   [1..8]    int64   tick
+ *   [9]       uint8   tickRate
+ *   [10..11]  uint16  nPlanets
+ *   per planet (7 bytes): id(u16) owner(u8) ships(i32)
+ *   [n..n+1]  uint16  nFleets
+ *   per fleet (27 bytes): id(u32) owner(u8) src(u16) dst(u16) ships(u16)
+ *                         x(f32) y(f32) vx(f32) vy(f32)
+ */
+export function parseBinaryStateFrame(data: ArrayBuffer): StateMessage | null {
+  const view = new DataView(data);
+  if (view.byteLength < 12) return null;
+
+  const tick = Number(view.getBigInt64(1, true));
+  const tickRate = view.getUint8(9);
+  const nPlanets = view.getUint16(10, true);
+
+  let off = 12;
+  if (view.byteLength < off + nPlanets * 7) return null;
+
+  const planets: PlanetStateUpdate[] = [];
+  for (let i = 0; i < nPlanets; i++) {
+    const id = view.getUint16(off, true);
+    const owner = view.getUint8(off + 2);
+    const ships = view.getInt32(off + 3, true);
+    off += 7;
+    planets.push({ id, owner, ships });
+  }
+
+  if (view.byteLength < off + 2) return null;
+  const nFleets = view.getUint16(off, true);
+  off += 2;
+
+  if (view.byteLength < off + nFleets * 27) return null;
+
+  const fleets: FleetSnapshot[] = [];
+  for (let i = 0; i < nFleets; i++) {
+    const id = view.getUint32(off, true);
+    const owner = view.getUint8(off + 4);
+    const src = view.getUint16(off + 5, true);
+    const dst = view.getUint16(off + 7, true);
+    const ships = view.getUint16(off + 9, true);
+    const x = view.getFloat32(off + 11, true);
+    const y = view.getFloat32(off + 15, true);
+    const vx = view.getFloat32(off + 19, true);
+    const vy = view.getFloat32(off + 23, true);
+    off += 27;
+    fleets.push({ id, owner, src, dst, ships, x, y, vx, vy });
+  }
+
+  return { t: "state", tick, tickRate, planets, fleets };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
@@ -209,42 +276,6 @@ function parsePlayerColor(value: unknown): PlayerColor | null {
   }
 
   return { playerId, color };
-}
-
-function parsePlanetStateUpdate(value: unknown): PlanetStateUpdate | null {
-  if (!Array.isArray(value) || value.length !== 3) {
-    return null;
-  }
-
-  const [id, owner, ships] = value;
-  if (!isNumber(id) || !isNumber(owner) || !isNumber(ships)) {
-    return null;
-  }
-
-  return { id, owner, ships };
-}
-
-function parseCompactFleet(value: unknown): FleetSnapshot | null {
-  if (!Array.isArray(value) || value.length !== 9) {
-    return null;
-  }
-
-  const [id, owner, src, dst, ships, x, y, vx, vy] = value;
-  if (
-    !isNumber(id) ||
-    !isNumber(owner) ||
-    !isNumber(src) ||
-    !isNumber(dst) ||
-    !isNumber(ships) ||
-    !isNumber(x) ||
-    !isNumber(y) ||
-    !isNumber(vx) ||
-    !isNumber(vy)
-  ) {
-    return null;
-  }
-
-  return { id, owner, src, dst, ships, x, y, vx, vy };
 }
 
 function parseSnapshot(value: unknown): Snapshot | null {
@@ -393,38 +424,6 @@ export function parseServerMessage(parsed: unknown): ServerMessage | null {
     case "state": {
       if (!isNumber(parsed.tick)) {
         return null;
-      }
-
-      if (
-        isNumber(parsed.r) &&
-        Array.isArray(parsed.p) &&
-        Array.isArray(parsed.f)
-      ) {
-        const planets: PlanetStateUpdate[] = [];
-        for (const planet of parsed.p) {
-          const parsedPlanet = parsePlanetStateUpdate(planet);
-          if (parsedPlanet === null) {
-            return null;
-          }
-          planets.push(parsedPlanet);
-        }
-
-        const fleets: FleetSnapshot[] = [];
-        for (const fleet of parsed.f) {
-          const parsedFleet = parseCompactFleet(fleet);
-          if (parsedFleet === null) {
-            return null;
-          }
-          fleets.push(parsedFleet);
-        }
-
-        return {
-          t: "state",
-          tick: parsed.tick,
-          tickRate: parsed.r,
-          planets,
-          fleets,
-        };
       }
 
       const state = parseSnapshot(parsed.state);

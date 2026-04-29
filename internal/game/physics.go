@@ -18,7 +18,9 @@ const (
 	fleetSeparationDistance  = 8.0
 )
 
-func (engine *Engine) advanceFleet(id int, fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex, deltaSeconds float64) {
+// advanceFleet moves fleet one tick. It returns true if the fleet reached its
+// target this tick; the caller is responsible for calling resolveArrival.
+func (engine *Engine) advanceFleet(fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex, deltaSeconds float64) bool {
 	desiredX, desiredY := engine.computeFleetAcceleration(fleet, target, steeringIndex, planetIndex)
 	desiredX, desiredY = normalizeVector(desiredX, desiredY)
 	if desiredX == 0 && desiredY == 0 {
@@ -43,14 +45,14 @@ func (engine *Engine) advanceFleet(id int, fleet *Fleet, target *Planet, steerin
 	nextX := fleet.X + fleet.VX*deltaSeconds
 	nextY := fleet.Y + fleet.VY*deltaSeconds
 	if segmentIntersectsCircle(fleet.X, fleet.Y, nextX, nextY, target, fleetCollisionRadius) {
-		engine.resolveArrival(id, fleet, target)
-		return
+		return true
 	}
 
 	fleet.X = nextX
 	fleet.Y = nextY
 	engine.resolvePlanetCollisions(fleet, target, planetIndex)
 	fleet.VX, fleet.VY = clampMagnitude(fleet.VX, fleet.VY, engine.fleetSpeed)
+	return false
 }
 
 func (engine *Engine) computeFleetAcceleration(fleet *Fleet, target *Planet, steeringIndex *fleetSpatialIndex, planetIndex *planetSpatialIndex) (float64, float64) {
@@ -206,24 +208,6 @@ func (engine *Engine) resolveFleetCollisions(collisionIndex *fleetSpatialIndex) 
 			second.VX, second.VY = clampMagnitude(second.VX, second.VY, engine.fleetSpeed)
 		})
 	}
-}
-
-func (engine *Engine) resolveArrival(id int, fleet *Fleet, target *Planet) {
-	fleet.X = target.X
-	fleet.Y = target.Y
-
-	if target.Owner == fleet.Owner {
-		target.Ships += fleet.Ships
-	} else {
-		target.Ships -= fleet.Ships
-		if target.Ships < 0 {
-			target.Owner = fleet.Owner
-			target.Ships = -target.Ships
-		}
-	}
-
-	engine.removeSortedFleetID(id)
-	delete(engine.fleets, id)
 }
 
 func clamp01(value float64) float64 {

@@ -365,19 +365,15 @@ export class GameScreen extends Container {
   }
 
   private sendSelectedFleets(targetID: number): boolean {
-    let sentAny = false;
-
-    for (const sourceID of this.selectedSourceIDs) {
-      if (sourceID === targetID) {
-        continue;
-      }
-      if (!this.client.sendFleet(sourceID, targetID, this.sendPercentage)) {
-        return false;
-      }
-      sentAny = true;
+    const sources = [...this.selectedSourceIDs].filter((id) => id !== targetID);
+    if (sources.length === 0) {
+      return false;
     }
-
-    return sentAny;
+    return this.client.sendFleetFromMany(
+      sources,
+      targetID,
+      this.sendPercentage,
+    );
   }
 
   private clearSelection(render = true): void {
