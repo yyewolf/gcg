@@ -84,6 +84,8 @@ func (manager *lobbyManager) handleWS(writer http.ResponseWriter, request *http.
 	}
 
 	manager.mu.Lock()
+	trackEvent(request, "websocket_connect")
+
 	manager.clients[client] = struct{}{}
 	createdLobby := manager.ensureOpenLobbyLocked()
 	manager.mu.Unlock()

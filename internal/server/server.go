@@ -18,7 +18,14 @@ func New(address string, assets fs.FS) *Server {
 	manager := newLobbyManager()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", manager.handleWS)
-	mux.Handle("/", http.FileServer(http.FS(assets)))
+
+	staticHandler := http.FileServer(http.FS(assets))
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && (r.URL.Path == "/" || r.URL.Path == "/index.html") {
+			trackPageView(r)
+		}
+		staticHandler.ServeHTTP(w, r)
+	}))
 
 	return &Server{
 		manager: manager,
